@@ -2,7 +2,9 @@
 
 All notable changes to this project are documented here.
 
-## [Unreleased]
+## [0.4.1] — 2026-09-09
+
+One fix to the transaction lifecycle log, reported by a signer.
 
 ### Fixed
 
@@ -11,7 +13,9 @@ All notable changes to this project are documented here.
   plain text on a "via delegate" line. It now shows the delegate on the "by"
   line, with the delegator owner on a "delegate of" line below it, which matches
   what the Safe web app shows. The delegate renders through the address
-  component, so it carries its address-book label.
+  component, so it carries its address-book label. A delegate for which the
+  service recorded no owner is disclosed on a "proposed by a delegate" line, so
+  it is never read as an owner.
 
 ## [0.4.0] — 2026-09-02
 

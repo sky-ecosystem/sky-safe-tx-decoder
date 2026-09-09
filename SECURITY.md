@@ -33,12 +33,12 @@ yourself from a git tag rather than installing from npm:
 git clone https://github.com/sky-ecosystem/sky-safe-tx-decoder
 cd sky-safe-tx-decoder
 
-# 2. Check out a signed git tag (replace v0.4.0 with the version you want)
+# 2. Check out a signed git tag (replace v0.4.1 with the version you want)
 git fetch --tags
-git checkout v0.4.0
+git checkout v0.4.1
 
 # 3. Verify the tag's GPG signature against a maintainer's public key
-git tag -v v0.4.0
+git tag -v v0.4.1
 
 
 # 4. Install with the locked dependency tree and no install scripts
