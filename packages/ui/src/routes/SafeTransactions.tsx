@@ -233,12 +233,15 @@ export default function SafeTransactions() {
                               <Address address={row.actor} />
                             </>
                           )}
-                          {row.delegateOf && (
-                            <>
-                              <span>delegate of</span>
-                              <Address address={row.delegateOf} />
-                            </>
-                          )}
+                          {row.delegateOf !== undefined &&
+                            (row.delegateOf === null ? (
+                              <span>proposed by a delegate</span>
+                            ) : (
+                              <>
+                                <span>delegate of</span>
+                                <Address address={row.delegateOf} />
+                              </>
+                            ))}
                         </div>
                       ))}
                     </div>
