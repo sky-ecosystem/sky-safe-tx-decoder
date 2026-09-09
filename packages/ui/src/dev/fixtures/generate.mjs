@@ -32,6 +32,13 @@ const CONFIGURATOR = getAddress('0xb7E61Df6CAb0A51E9A5dab1A7DD3f942dDe5b929')
 const RATE_LIMITS = getAddress('0xE016Ae733A77Ba77E7907aAA749394Fc5e75C0e1')
 const CONTROLLER = getAddress('0xbf83F5974B932c7D842254042717D6A2706CE5eE')
 
+/**
+ * Fabricated owner and delegate, used by the delegated-proposal fixture. Not
+ * real accounts. Checksummed by viem rather than written by hand.
+ */
+const MOCK_OWNER = getAddress('0xabbaabbaabbaabbaabbaabbaabbaabbaabbaabba')
+const MOCK_DELEGATE = getAddress('0xde1e6a7ede1e6a7ede1e6a7ede1e6a7ede1e6a7e')
+
 const UINT256_MAX = (1n << 256n) - 1n
 
 const setRateLimit = (key, maxAmount, slope) =>
@@ -128,6 +135,21 @@ const FIXTURES = [
       'maxAmount is type(uint256).max but slope is not zero. On a key locked unlimited this reverts; on any other key it sets an effectively unbounded limit.',
     data: setRateLimit(LIMIT_USDS_MINT, UINT256_MAX, 1n),
   },
+
+  // --- Lifecycle rendering, not decoder behaviour ---
+  {
+    nonce: 13,
+    name: 'lifecycle-delegate-proposal',
+    description:
+      'A proposal submitted by a delegate. The Safe Transaction Service reports proposer as the delegator owner and proposedByDelegate as the address that submitted. The lifecycle log names the delegate as the proposer, with the owner on a "delegate of" line.',
+    data: setRateLimit(LIMIT_USDS_MINT, 6_000_000_000_000_000_000_000_000n, 69_444_444_444_444_444_444n),
+    // Extra service fields merged into the transaction body.
+    extra: {
+      submissionDate: '2026-09-01T12:00:00Z',
+      proposer: MOCK_OWNER,
+      proposedByDelegate: MOCK_DELEGATE,
+    },
+  },
 ]
 
 for (const fixture of FIXTURES) {
@@ -154,6 +176,9 @@ for (const fixture of FIXTURES) {
       isSuccessful: null,
       confirmations: [],
       dataDecoded: null,
+      // Optional per-fixture service fields (submissionDate, proposer,
+      // proposedByDelegate, ...). Absent on most fixtures.
+      ...(fixture.extra || {}),
     },
   }
   const file = path.join(HERE, `${fixture.name}.json`)
