@@ -6,6 +6,14 @@
  *
  * Actors (proposer, signer, executor) render through <Address> so they pick up
  * address-book / Safe treatment and are never abbreviated.
+ *
+ * Delegate rule: the service sets `proposer` to the owner and, when a delegate
+ * submitted the proposal, sets `proposer` to the delegator owner and
+ * `proposedByDelegate` to the submitting delegate. The Proposed event therefore
+ * names the delegate as the actor, with the delegator owner on a "delegate of"
+ * line below it, which matches what the Safe web app shows. A delegate whose
+ * owner the service did not record is still disclosed as a delegate, on a
+ * "proposed by a delegate" line, so the actor is never mistaken for an owner.
  */
 
 import type { SafeApiMultisigTransaction } from '@shield3/sky-safe-core';
@@ -25,6 +33,13 @@ interface LogEvent {
   title: string;
   tone: Tone;
   actor?: string;
+  /**
+   * Present only when the actor is a delegate. A string is the delegator
+   * owner, rendered as "delegate of <address>" beneath the actor, through
+   * <Address>. `null` means the service recorded no owner, and renders as
+   * "proposed by a delegate". Absent means the actor is not a delegate.
+   */
+  delegateOf?: string | null;
   detail?: string;
 }
 
@@ -74,12 +89,21 @@ function relative(diffMs: number): string {
  * Compact lifecycle log for a transaction-list row: proposed, each signer, and
  * the terminal event (executed / reverted). Actors are returned as raw
  * addresses so the list can render them through <Address> (never abbreviated).
+ *
+ * When a delegate submitted the proposal, the actor is the delegate and
+ * `delegateOf` carries the delegator owner, or `null` when the service
+ * recorded no owner. It is absent when the actor is not a delegate.
  */
 export function conciseTimeline(
   tx: SafeApiMultisigTransaction
-): Array<{ label: string; time: string; actor?: string }> {
-  const rows: Array<{ label: string; time: string; actor?: string }> = [
-    { label: 'Proposed', time: formatTime(tx.submissionDate), actor: tx.proposer || undefined },
+): Array<{ label: string; time: string; actor?: string; delegateOf?: string | null }> {
+  const rows: Array<{ label: string; time: string; actor?: string; delegateOf?: string | null }> = [
+    {
+      label: 'Proposed',
+      time: formatTime(tx.submissionDate),
+      actor: tx.proposedByDelegate || tx.proposer || undefined,
+      delegateOf: tx.proposedByDelegate ? tx.proposer || null : undefined,
+    },
   ];
 
   for (const c of [...(tx.confirmations || [])].sort(
@@ -112,8 +136,8 @@ export function TransactionLog({ transaction, allTransactions, safeAddress }: Tr
     date: transaction.submissionDate,
     title: thisIsRejection ? 'Rejection proposed' : 'Proposed',
     tone: 'proposed',
-    actor: transaction.proposer || undefined,
-    detail: transaction.proposedByDelegate ? `via delegate ${transaction.proposedByDelegate}` : undefined,
+    actor: transaction.proposedByDelegate || transaction.proposer || undefined,
+    delegateOf: transaction.proposedByDelegate ? transaction.proposer || null : undefined,
   });
 
   // Signatures — sorted oldest first
@@ -182,6 +206,18 @@ export function TransactionLog({ transaction, allTransactions, safeAddress }: Tr
                 <span className="text-xs mt-0.5">
                   <span className="text-gray-500">by </span>
                   <Address address={e.actor} />
+                </span>
+              )}
+              {e.delegateOf !== undefined && (
+                <span className="text-xs mt-0.5">
+                  {e.delegateOf === null ? (
+                    <span className="text-gray-500">proposed by a delegate</span>
+                  ) : (
+                    <>
+                      <span className="text-gray-500">delegate of </span>
+                      <Address address={e.delegateOf} />
+                    </>
+                  )}
                 </span>
               )}
               {e.detail && <span className="text-xs text-gray-500">{e.detail}</span>}

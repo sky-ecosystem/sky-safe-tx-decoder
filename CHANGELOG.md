@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- **A transaction proposed through a delegate named the wrong proposer.** The
+  lifecycle log showed the delegator owner on the "by" line and the delegate as
+  plain text on a "via delegate" line. It now shows the delegate on the "by"
+  line, with the delegator owner on a "delegate of" line below it, which matches
+  what the Safe web app shows. The delegate renders through the address
+  component, so it carries its address-book label.
+
 ## [0.4.0] — 2026-09-02
 
 Decoders for the Sky PAS Configurator and the Sky PAU diamond, nested Safe

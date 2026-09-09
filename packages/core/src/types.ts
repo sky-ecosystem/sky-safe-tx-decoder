@@ -115,9 +115,17 @@ export interface SafeApiMultisigTransaction {
   transactionHash: string | null
   safeTxHash: string
   executor: Address | null
-  /** Address that proposed the transaction to the service. */
+  /**
+   * Owner the service attributes the proposal to. When an owner submitted the
+   * proposal, this is that owner. When a delegate submitted it, this is the
+   * delegator owner who authorised the delegate, not the submitting address.
+   */
   proposer: Address | null
-  /** Delegate address, when the transaction was proposed via a delegate. */
+  /**
+   * Delegate that actually submitted the proposal, when a delegate submitted
+   * it. Null when an owner submitted it directly. When set, `proposer` holds
+   * the delegator owner.
+   */
   proposedByDelegate: Address | null
   isExecuted: boolean
   isSuccessful: boolean | null

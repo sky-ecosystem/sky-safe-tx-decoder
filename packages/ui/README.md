@@ -66,6 +66,8 @@ http://localhost:5173/#/safe/ethereum/0xfeEDfaCeFeEdFaceFEedFACefEEDFaCEfEeDfAce
 | 10 | `pau-uniswap-v3-swap` | PAU: a Uniswap v3 swap, bounded by `maxTickDelta` rather than max slippage |
 | 11 | `pau-uniswap-v3-add-liquidity` | PAU: `addLiquidity`, with its tick and amount tuples |
 | 12 | `pau-uniswap-v3-remove-liquidity` | PAU: `removeLiquidity` by token id and liquidity |
+| 13 | `lifecycle-delegate-proposal` | A proposal submitted by a delegate: the delegate is the proposer, the delegator owner is on a `delegate of` line |
+| 14 | `lifecycle-delegate-no-owner` | The same, but the service recorded no owner: the delegate is still disclosed on a `proposed by a delegate` line |
 
 Nonces 4 and 5 are worth opening back to back. They share a key name and differ by a factor
 of 10^12.
@@ -83,6 +85,10 @@ rather than trusting it. Nothing fakes a passing verification.
 ### Adding a fixture
 
 1. Add an entry to `FIXTURES` in `src/dev/fixtures/generate.mjs`, giving it an unused nonce.
+   An optional `extra` object on the entry is merged into the transaction body. It may set
+   only `submissionDate`, `executionDate`, `proposer`, `proposedByDelegate`, and `executor`.
+   Any other key throws, so a fixture cannot override a signed field or the placeholder
+   `safeTxHash`.
 2. Run `node packages/ui/src/dev/fixtures/generate.mjs`.
 3. Open the new nonce. The fixture is picked up automatically; nothing else needs editing.
 

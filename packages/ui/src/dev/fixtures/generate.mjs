@@ -32,6 +32,41 @@ const CONFIGURATOR = getAddress('0xb7E61Df6CAb0A51E9A5dab1A7DD3f942dDe5b929')
 const RATE_LIMITS = getAddress('0xE016Ae733A77Ba77E7907aAA749394Fc5e75C0e1')
 const CONTROLLER = getAddress('0xbf83F5974B932c7D842254042717D6A2706CE5eE')
 
+/**
+ * Fabricated owner and delegate, used by the delegated-proposal fixture. Not
+ * real accounts. Checksummed by viem rather than written by hand.
+ */
+const MOCK_OWNER = getAddress('0xabbaabbaabbaabbaabbaabbaabbaabbaabbaabba')
+const MOCK_DELEGATE = getAddress('0xde1e6a7ede1e6a7ede1e6a7ede1e6a7ede1e6a7e')
+
+/**
+ * The only keys a fixture's `extra` may set. These are service metadata about
+ * who proposed and executed a transaction, and when. The signed fields and the
+ * placeholder `safeTxHash` are deliberately not in this list: a fixture must
+ * never be able to assert a hash the app would then appear to verify.
+ */
+const ALLOWED_EXTRA_KEYS = [
+  'submissionDate',
+  'executionDate',
+  'proposer',
+  'proposedByDelegate',
+  'executor',
+]
+
+/** Returns `extra` with every key checked against the allowlist. */
+function checkedExtra(fixture) {
+  const extra = fixture.extra || {}
+  for (const key of Object.keys(extra)) {
+    if (!ALLOWED_EXTRA_KEYS.includes(key)) {
+      throw new Error(
+        `Fixture "${fixture.name}" sets extra."${key}", which is not allowed. ` +
+          `extra may only set: ${ALLOWED_EXTRA_KEYS.join(', ')}.`
+      )
+    }
+  }
+  return extra
+}
+
 const UINT256_MAX = (1n << 256n) - 1n
 
 const setRateLimit = (key, maxAmount, slope) =>
@@ -128,6 +163,33 @@ const FIXTURES = [
       'maxAmount is type(uint256).max but slope is not zero. On a key locked unlimited this reverts; on any other key it sets an effectively unbounded limit.',
     data: setRateLimit(LIMIT_USDS_MINT, UINT256_MAX, 1n),
   },
+
+  // --- Lifecycle rendering, not decoder behaviour ---
+  {
+    nonce: 13,
+    name: 'lifecycle-delegate-proposal',
+    description:
+      'A proposal submitted by a delegate. The Safe Transaction Service reports proposer as the delegator owner and proposedByDelegate as the address that submitted. The lifecycle log names the delegate as the proposer, with the owner on a "delegate of" line.',
+    data: setRateLimit(LIMIT_USDS_MINT, 6_000_000_000_000_000_000_000_000n, 69_444_444_444_444_444_444n),
+    // Extra service fields merged into the transaction body.
+    extra: {
+      submissionDate: '2026-09-01T12:00:00Z',
+      proposer: MOCK_OWNER,
+      proposedByDelegate: MOCK_DELEGATE,
+    },
+  },
+  {
+    nonce: 14,
+    name: 'lifecycle-delegate-no-owner',
+    description:
+      'A proposal submitted by a delegate for which the service recorded no proposer. The delegate is still disclosed as a delegate, on a "proposed by a delegate" line, so it is not mistaken for an owner.',
+    data: setRateLimit(LIMIT_USDS_MINT, 1_000_000_000_000_000_000_000_000n, 11_574_074_074_074_074_074n),
+    extra: {
+      submissionDate: '2026-09-02T12:00:00Z',
+      proposer: null,
+      proposedByDelegate: MOCK_DELEGATE,
+    },
+  },
 ]
 
 for (const fixture of FIXTURES) {
@@ -154,6 +216,10 @@ for (const fixture of FIXTURES) {
       isSuccessful: null,
       confirmations: [],
       dataDecoded: null,
+      // Optional per-fixture service metadata, restricted to
+      // ALLOWED_EXTRA_KEYS so a fixture cannot override a signed field or the
+      // placeholder safeTxHash. Absent on most fixtures.
+      ...checkedExtra(fixture),
     },
   }
   const file = path.join(HERE, `${fixture.name}.json`)
