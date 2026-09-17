@@ -3,7 +3,7 @@ import Home from './routes/Home';
 import SafeTransactions from './routes/SafeTransactions';
 import TransactionAnalysis from './routes/TransactionAnalysis';
 import Settings from './routes/Settings';
-import { AddressBookProvider } from './address-book/AddressBookContext';
+import { AddressBookProvider, RemoteAddressBookLoader } from './address-book/AddressBookContext';
 import { AddressBookBar } from './address-book/AddressBookBar';
 import { UnsavedSafePrompt } from './address-book/UnsavedSafePrompt';
 import { SafeRouteProvider } from './safe-route/SafeRouteProvider';
@@ -31,6 +31,8 @@ export default function App() {
               </div>
             </header>
             <AddressBookBar />
+            {/* Inside the router so it can read the route network. */}
+            <RemoteAddressBookLoader />
             <UnsavedSafePrompt />
             <main className="container mx-auto px-4 py-8 flex-1">
               <Routes>

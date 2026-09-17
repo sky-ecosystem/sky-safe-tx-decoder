@@ -223,6 +223,56 @@ function MySafesTable({ safes }: { safes: AddressBookSafe[] }) {
   );
 }
 
+function RemoteAddressBookSection() {
+  const { remoteBook, loadRemote, clearRemote } = useAddressBook();
+  const { remoteAddressBookUrl, setRemoteAddressBookUrl } = useSettings();
+  const url = remoteAddressBookUrl.trim();
+
+  return (
+    <section>
+      <h3 className="text-xl font-semibold mb-1">Remote address book</h3>
+      <p className="text-sm text-gray-600 mb-3">
+        The URL is fetched with your browser's cookies for the same origin only. Nothing from it is stored beyond this
+        session. The offline build and a localhost dev server cannot use it unless the URL is same-origin with the page.
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-gray-600 flex-1 min-w-[20rem]">
+          Service URL
+          <input
+            type="text"
+            value={remoteAddressBookUrl}
+            onChange={(e) => setRemoteAddressBookUrl(e.target.value)}
+            placeholder="/api/v1/addresses"
+            className="block mt-1 w-full px-2 py-1 border border-gray-300 rounded text-sm font-mono"
+          />
+        </label>
+        <button
+          type="button"
+          disabled={url === ''}
+          onClick={() => void loadRemote(url, null)}
+          className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:bg-gray-300"
+        >
+          Load
+        </button>
+        <button
+          type="button"
+          onClick={clearRemote}
+          className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-100"
+        >
+          Clear
+        </button>
+      </div>
+      {remoteBook.status === 'error' && <p className="mt-2 text-sm font-semibold text-red-700">{remoteBook.error}</p>}
+      {remoteBook.status === 'ok' && (
+        <p className="mt-2 text-sm text-green-800">
+          {remoteBook.entries.length} entries, {remoteBook.skipped.length} skipped, {remoteBook.conflicts.length}{' '}
+          conflicts with the CSV address book.
+        </p>
+      )}
+    </section>
+  );
+}
+
 export default function Settings() {
   const { addressBook, mySafes, exportMySafes } = useAddressBook();
   const { sourcifyFallback, setSourcifyFallback } = useSettings();
@@ -264,6 +314,8 @@ export default function Settings() {
           </span>
         </label>
       </section>
+
+      <RemoteAddressBookSection />
 
       {/* My Safes — add / edit / remove + export */}
       <section>

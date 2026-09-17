@@ -8,6 +8,7 @@
  */
 
 import { useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { useAddressBook } from './AddressBookContext';
 import { AddressBookBrowser } from './AddressBookBrowser';
 import { downloadCsv } from './download';
@@ -107,6 +108,109 @@ export function AddressBookBar() {
           }
         />
       </div>
+      <RemoteBookStrip />
+    </div>
+  );
+}
+
+/**
+ * Full-width strip for the remote address book, under the two CSV slots.
+ *
+ * The error state is deliberately the loudest thing on the page. A signer who
+ * believes the book is loaded, when it is not, reviews every address against
+ * nothing — so a failed fetch must be impossible to read past.
+ */
+function RemoteBookStrip() {
+  const { remoteBook, loadRemote } = useAddressBook();
+  const [showBrowser, setShowBrowser] = useState(false);
+  const reload = () => void loadRemote(remoteBook.url, remoteBook.network);
+
+  if (remoteBook.status === 'idle') {
+    return (
+      <div className="container mx-auto px-4 pb-2 text-xs text-gray-500">
+        Remote address book: not configured (
+        <Link to="/settings" className="text-blue-600 hover:underline">
+          Settings
+        </Link>
+        )
+      </div>
+    );
+  }
+
+  if (remoteBook.status === 'loading') {
+    return <div className="container mx-auto px-4 pb-2 text-xs text-gray-600">Remote address book: Fetching…</div>;
+  }
+
+  if (remoteBook.status === 'error') {
+    return (
+      <div className="bg-red-600 text-white">
+        <div className="container mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="font-bold text-sm">
+            Remote address book unavailable: {remoteBook.error}. Addresses from it are treated as unknown.
+          </p>
+          <button
+            type="button"
+            onClick={reload}
+            className="text-xs font-semibold px-3 py-1.5 bg-white text-red-700 rounded hover:bg-red-50"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container mx-auto px-4 pb-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 rounded border border-green-300 bg-green-50 text-green-900 text-sm">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-semibold">Remote address book</span>
+          <span className="text-xs">
+            <span className="font-mono">{remoteBook.sourceName ?? remoteBook.url}</span>
+            {' · '}
+            {remoteBook.entries.length} entr{remoteBook.entries.length === 1 ? 'y' : 'ies'}
+            {remoteBook.skipped.length > 0 && (
+              <>
+                {', '}
+                <span className="text-yellow-800 font-semibold">{remoteBook.skipped.length} skipped</span>
+              </>
+            )}
+            {remoteBook.conflicts.length > 0 && (
+              <>
+                {', '}
+                <span className="text-amber-800 font-semibold">{remoteBook.conflicts.length} conflicts</span>
+              </>
+            )}
+            {remoteBook.fetchedAt && <>{' · '}fetched {formatLoadedAt(remoteBook.fetchedAt)}</>}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowBrowser(true)}
+            className="text-xs px-2 py-1 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-100"
+          >
+            View
+          </button>
+          <button
+            type="button"
+            onClick={reload}
+            className="text-xs px-2 py-1 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-100"
+          >
+            Reload
+          </button>
+        </div>
+      </div>
+      {showBrowser && (
+        <AddressBookBrowser
+          title="Remote address book"
+          filename={remoteBook.url}
+          loadedAt={remoteBook.fetchedAt ?? new Date()}
+          entries={remoteBook.entries}
+          skipped={remoteBook.skipped}
+          onClose={() => setShowBrowser(false)}
+        />
+      )}
     </div>
   );
 }

@@ -33,8 +33,11 @@ function pickBook(tags: AddressTag[]): AddressTag | undefined {
 export function Address({ address, safeAddress, className = '' }: AddressProps) {
   // The unknown-address tint only makes sense when we have a managed list of
   // known addresses to compare against (the address book).
-  const { addressBook } = useAddressBook();
-  const bookLoaded = addressBook !== null;
+  // A configured remote book that failed to load still counts as "a book is
+  // in play": fail closed, so the unknown-address tint stays on instead of
+  // every address looking plain and therefore fine.
+  const { addressBook, remoteBook } = useAddressBook();
+  const bookLoaded = addressBook !== null || remoteBook.status !== 'idle';
   const routeCtx = useOptionalSafeRoute();
   // NEVER truncate — signers must see the full address to detect spoofs.
   const display = address;
@@ -71,6 +74,27 @@ export function Address({ address, safeAddress, className = '' }: AddressProps) 
     );
   }
 
+  // The two address-book sources disagree about this address. Show both labels
+  // rather than one of them: a label the signer cannot check is worse than no
+  // label, so the disagreement itself is the message.
+  if (book?.conflict) {
+    return (
+      <span
+        className={`inline-flex items-center gap-1 bg-amber-50 text-amber-900 border border-amber-400 px-1 rounded font-mono ${className}`}
+        title={
+          `The remote address book and your CSV address book disagree about this address. ` +
+          `Remote: "${book.label}" (${book.status}). CSV: "${book.conflict.otherLabel}" (${book.conflict.otherStatus}). ` +
+          `Resolve the disagreement at the source before you trust either label.`
+        }
+      >
+        {display}
+        <span className="text-xs bg-amber-300 px-1 rounded font-semibold">
+          ⚠ label conflict: {book.label} (remote) vs {book.conflict.otherLabel} (csv)
+        </span>
+      </span>
+    );
+  }
+
   // Both built-in and address-book entry — collapse to a single verified badge
   // showing the signer's label; the built-in protocol name moves to the tooltip
   // to avoid a redundant double badge.
@@ -81,7 +105,10 @@ export function Address({ address, safeAddress, className = '' }: AddressProps) 
         title={`${builtIn.label} — ${builtIn.description} • verified ${book.verificationDate || 'n/a'}`}
       >
         {display}
-        <span className="text-xs bg-green-200 px-1 rounded">✓ {book.label}</span>
+        <span className="text-xs bg-green-200 px-1 rounded">
+          ✓ {book.label}
+          {book.origin === 'remote' && ' · remote'}
+        </span>
       </span>
     );
   }
@@ -94,7 +121,10 @@ export function Address({ address, safeAddress, className = '' }: AddressProps) 
         title={`Address book: ${book.label} (verified ${book.verificationDate || 'n/a'})`}
       >
         {display}
-        <span className="text-xs bg-green-200 px-1 rounded">✓ {book.label}</span>
+        <span className="text-xs bg-green-200 px-1 rounded">
+          ✓ {book.label}
+          {book.origin === 'remote' && ' · remote'}
+        </span>
       </span>
     );
   }
