@@ -115,18 +115,23 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
   const [mySafes, setMySafes] = useState<MySafesSlot | null>(null);
   const [remoteBook, setRemoteBook] = useState<RemoteBookSlot>(IDLE_REMOTE);
 
+  // The CSV book and the remote book are one list: merged so a disagreement
+  // between them becomes a conflict on the tag rather than one silently chosen
+  // label. Computed once and reused by the tag rebuild and by the bar's count.
+  const merged = useMemo(
+    () => mergeAddressBooks(addressBook?.entries ?? [], remoteBook.entries),
+    [addressBook, remoteBook.entries]
+  );
+
   // Rebuild the shared address-book tag bucket from ALL sources whenever any
-  // slot changes. Centralizing here lets the three sources coexist instead of
-  // clobbering each other's tags. The CSV book and the remote book are merged
-  // first so a disagreement between them reaches the badge as a conflict
-  // rather than as one silently chosen label.
+  // slot changes. Centralizing here lets the sources coexist instead of
+  // clobbering each other's tags.
   useEffect(() => {
     clearAddressBookTags();
-    const { entries, conflicts } = mergeAddressBooks(addressBook?.entries ?? [], remoteBook.entries);
-    const conflictByKey = new Map(conflicts.map((c) => [c.address.toLowerCase(), c]));
-    for (const e of entries) registerAddressTag(e.address, buildMergedTag(e, conflictByKey.get(e.address.toLowerCase())));
+    const byKey = new Map(merged.conflicts.map((c) => [lc(c.address), c]));
+    for (const e of merged.entries) registerAddressTag(e.address, buildMergedTag(e, byKey.get(lc(e.address))));
     for (const s of mySafes?.safes ?? []) registerAddressTag(s.address, buildAddressBookTag(s));
-  }, [addressBook, mySafes, remoteBook]);
+  }, [merged, mySafes]);
 
   const loadRemote = useCallback(async (url: string, network: string | null) => {
     setRemoteBook({ ...IDLE_REMOTE, status: 'loading', url, network });
@@ -178,14 +183,6 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearRemote = useCallback(() => setRemoteBook(IDLE_REMOTE), []);
-
-  // Conflicts are a property of the merge, not of the fetch, so they are
-  // computed against the current CSV book and mirrored back into the slot for
-  // the bar to count.
-  const conflicts = useMemo(
-    () => mergeAddressBooks(addressBook?.entries ?? [], remoteBook.entries).conflicts,
-    [addressBook, remoteBook.entries]
-  );
 
   const loadAddressBook = useCallback(async (file: File) => {
     const text = await file.text();
@@ -268,7 +265,7 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
     () => ({
       addressBook,
       mySafes,
-      remoteBook: { ...remoteBook, conflicts },
+      remoteBook: { ...remoteBook, conflicts: merged.conflicts },
       loadRemote,
       clearRemote,
       loadAddressBook,
@@ -284,7 +281,7 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
       addressBook,
       mySafes,
       remoteBook,
-      conflicts,
+      merged,
       loadRemote,
       clearRemote,
       loadAddressBook,
