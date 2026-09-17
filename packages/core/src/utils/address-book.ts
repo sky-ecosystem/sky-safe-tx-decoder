@@ -27,7 +27,13 @@
  */
 
 import type { Address } from 'viem';
-import { clearAddressBookTags, registerAddressTag, type AddressBookStatus, type AddressTag } from './address-tags.js';
+import {
+  clearAddressBookTags,
+  registerAddressTag,
+  type AddressBookOrigin,
+  type AddressBookStatus,
+  type AddressTag,
+} from './address-tags.js';
 import { isNetworkSupported } from '../api/networks.js';
 
 export type AddressBookEntryType = 'address' | 'safe';
@@ -38,6 +44,12 @@ export interface AddressBookEntry {
   verificationDate: string;
   status: AddressBookStatus;
   type: AddressBookEntryType;
+  /**
+   * Which feed this entry came from. Absent on entries parsed from a CSV by
+   * this module; set by the merge in address-book-remote.ts. Additive — no
+   * existing consumer reads it.
+   */
+  origin?: AddressBookOrigin;
 }
 
 export interface AddressBookSafe {
@@ -329,8 +341,9 @@ export function buildAddressBookTag(entry: {
   label: string;
   status: AddressBookStatus;
   verificationDate: string;
+  origin?: AddressBookOrigin;
 }): AddressTag {
-  return {
+  const tag: AddressTag = {
     label: entry.label,
     description:
       entry.status === 'active'
@@ -341,6 +354,8 @@ export function buildAddressBookTag(entry: {
     status: entry.status,
     verificationDate: entry.verificationDate,
   };
+  if (entry.origin) tag.origin = entry.origin;
+  return tag;
 }
 
 /**

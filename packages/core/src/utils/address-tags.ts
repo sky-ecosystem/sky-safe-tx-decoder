@@ -22,6 +22,13 @@ import {
 export type AddressTagSource = 'built-in' | 'address-book'
 export type AddressBookStatus = 'active' | 'inactive'
 
+/**
+ * Which address-book feed an entry came from. Both feeds keep
+ * source: 'address-book' — origin only records provenance for display, so
+ * every existing consumer (address-book-check, badges) is unaffected.
+ */
+export type AddressBookOrigin = 'csv' | 'remote'
+
 export interface AddressTag {
   label: string
   description: string
@@ -29,6 +36,19 @@ export interface AddressTag {
   source: AddressTagSource
   status?: AddressBookStatus
   verificationDate?: string
+  /** Which address-book feed produced this tag. Absent for built-ins. */
+  origin?: AddressBookOrigin
+  /**
+   * Set when the two address-book feeds disagree about this address. The
+   * winning feed supplies the tag; this records what the other feed said so
+   * the signer can be shown the disagreement instead of a single label they
+   * cannot check.
+   */
+  conflict?: {
+    otherLabel: string
+    otherStatus: AddressBookStatus
+    otherOrigin: AddressBookOrigin
+  }
 }
 
 /**
