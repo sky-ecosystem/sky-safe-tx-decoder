@@ -247,7 +247,7 @@ function CsvCompareSlot() {
     return (
       <div className="text-xs">
         <button type="button" onClick={() => setRevealed(true)} className="text-blue-600 hover:underline">
-          Compare with a CSV file
+          Add addresses from a CSV file
         </button>
       </div>
     );
@@ -256,7 +256,7 @@ function CsvCompareSlot() {
   return (
     <CsvDropZone
       title="CSV address book"
-      hint="a second list, compared against the address book above"
+      hint="labels for addresses the address book does not have; a clash with the book is shown on the address"
       templateFilename="address-book-template.csv"
       templateCsv={ADDRESS_BOOK_TEMPLATE}
       onLoad={loadAddressBook}
