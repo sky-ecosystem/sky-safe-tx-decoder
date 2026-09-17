@@ -256,7 +256,11 @@ function RemoteAddressBookSection() {
         </button>
         <button
           type="button"
-          onClick={clearRemote}
+          // Clearing the URL too, otherwise the auto-loader refetches at once.
+          onClick={() => {
+            setRemoteAddressBookUrl('');
+            clearRemote();
+          }}
           className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-100"
         >
           Clear
