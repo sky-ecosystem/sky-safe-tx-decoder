@@ -5,7 +5,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildMergedTag, mergeAddressBooks, parseRemoteAddressBook } from './address-book-remote.js';
+import {
+  buildMergedTag,
+  checkRemoteAddressBookUrl,
+  mergeAddressBooks,
+  parseRemoteAddressBook,
+  parseSkySafeConfig,
+} from './address-book-remote.js';
 import type { AddressBookEntry } from './address-book.js';
 
 const USDS = '0xdC035D45d973E3EC169d2276DDab16f1e407384F' as `0x${string}`;
@@ -215,5 +221,111 @@ describe('buildMergedTag', () => {
   it('omits the origin for an entry that has none', () => {
     const tag = buildMergedTag(csvEntry());
     expect(tag.origin).toBeUndefined();
+  });
+});
+
+describe('parseSkySafeConfig', () => {
+  it('accepts a body with a remoteAddressBookUrl string', () => {
+    expect(parseSkySafeConfig({ remoteAddressBookUrl: '/api/v1/addresses' })).toEqual({
+      remoteAddressBookUrl: '/api/v1/addresses',
+    });
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(parseSkySafeConfig({ remoteAddressBookUrl: '  /api/v1/addresses  ' })).toEqual({
+      remoteAddressBookUrl: '/api/v1/addresses',
+    });
+  });
+
+  it('ignores other fields', () => {
+    expect(parseSkySafeConfig({ remoteAddressBookUrl: '/api/v1/addresses', other: 1 })).toEqual({
+      remoteAddressBookUrl: '/api/v1/addresses',
+    });
+  });
+
+  it('rejects a body that is not a JSON object', () => {
+    const message = 'Deployment configuration /sky-safe-config.json is not JSON';
+    expect(() => parseSkySafeConfig(null)).toThrow(message);
+    expect(() => parseSkySafeConfig('<html>login</html>')).toThrow(message);
+    expect(() => parseSkySafeConfig(42)).toThrow(message);
+    expect(() => parseSkySafeConfig([{ remoteAddressBookUrl: '/api/v1/addresses' }])).toThrow(message);
+  });
+
+  it('rejects a body without a usable remoteAddressBookUrl', () => {
+    const message = 'Deployment configuration /sky-safe-config.json has no remoteAddressBookUrl';
+    expect(() => parseSkySafeConfig({})).toThrow(message);
+    expect(() => parseSkySafeConfig({ remoteAddressBookUrl: '' })).toThrow(message);
+    expect(() => parseSkySafeConfig({ remoteAddressBookUrl: '   ' })).toThrow(message);
+    expect(() => parseSkySafeConfig({ remoteAddressBookUrl: 42 })).toThrow(message);
+    expect(() => parseSkySafeConfig({ remote_address_book_url: '/api/v1/addresses' })).toThrow(message);
+  });
+});
+
+describe('checkRemoteAddressBookUrl', () => {
+  const page = 'https://decoder.example.org/decoder/index.html#/safe/ethereum/0x0000000000000000000000000000000000000000';
+
+  it('resolves a relative path against the page', () => {
+    const url = checkRemoteAddressBookUrl('/api/v1/addresses', page);
+    expect(url.toString()).toBe('https://decoder.example.org/api/v1/addresses');
+  });
+
+  it('accepts an absolute URL on the page origin', () => {
+    const url = checkRemoteAddressBookUrl('https://decoder.example.org/api/v1/addresses', page);
+    expect(url.pathname).toBe('/api/v1/addresses');
+  });
+
+  it('rejects another origin and names both origins in full', () => {
+    expect(() => checkRemoteAddressBookUrl('https://book.example.net/api/v1/addresses', page)).toThrow(
+      "Remote address book URL is on another origin (https://book.example.net). " +
+        "It must be on this page's origin (https://decoder.example.org)."
+    );
+  });
+
+  it('rejects another port on the same host', () => {
+    expect(() => checkRemoteAddressBookUrl('https://decoder.example.org:8443/api/v1/addresses', page)).toThrow(
+      'is on another origin (https://decoder.example.org:8443)'
+    );
+  });
+
+  it('rejects a scheme that is not http or https', () => {
+    expect(() => checkRemoteAddressBookUrl('ftp://decoder.example.org/api', page)).toThrow(
+      'Remote address book URL must be http or https (got ftp:).'
+    );
+  });
+
+  it('rejects any URL on a page opened from a file', () => {
+    expect(() => checkRemoteAddressBookUrl('/api/v1/addresses', 'file:///Users/signer/index.html')).toThrow(
+      'Remote address book URL must be http or https (got file:).'
+    );
+  });
+
+  it('accepts a loopback dev server proxied on its own origin', () => {
+    const url = checkRemoteAddressBookUrl('/api/v1/addresses', 'http://localhost:5173/');
+    expect(url.toString()).toBe('http://localhost:5173/api/v1/addresses');
+  });
+});
+
+describe('mergeAddressBooks with an empty remote list', () => {
+  it('returns an empty book when both sources are empty', () => {
+    expect(mergeAddressBooks([], [])).toEqual({ entries: [], conflicts: [] });
+  });
+
+  it('keeps every CSV entry, in order, with no conflicts', () => {
+    const csv = [
+      csvEntry({ address: USDS }),
+      csvEntry({ address: USDT, label: 'Tether' }),
+      csvEntry({ address: USDC, label: 'USD Coin', status: 'inactive' }),
+    ];
+    const { entries, conflicts } = mergeAddressBooks(csv, []);
+    expect(conflicts).toHaveLength(0);
+    expect(entries.map((e) => e.address)).toEqual([USDS, USDT, USDC]);
+    expect(entries.map((e) => e.origin)).toEqual(['csv', 'csv', 'csv']);
+    expect(entries[2]!.status).toBe('inactive');
+  });
+
+  it('leaves an entry that already carries an origin untouched', () => {
+    const csv = [csvEntry({ address: USDS, origin: 'remote' })];
+    const { entries } = mergeAddressBooks(csv, []);
+    expect(entries[0]!.origin).toBe('remote');
   });
 });

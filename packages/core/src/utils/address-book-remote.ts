@@ -210,3 +210,71 @@ export function buildMergedTag(entry: AddressBookEntry, conflict?: AddressBookCo
   }
   return tag;
 }
+
+/**
+ * Same-origin path of the deployment configuration probe.
+ *
+ * The hosted copy must be byte-identical to the released artifact, so the
+ * address book URL cannot be baked into the bundle. The page reads it at
+ * run time from this path instead. A deployment that does not serve the file
+ * answers 404 and the connector stays idle.
+ */
+export const SKY_SAFE_CONFIG_PATH = '/sky-safe-config.json';
+
+export interface SkySafeConfig {
+  /** URL of the address book list endpoint. Same-origin with the page. */
+  remoteAddressBookUrl: string;
+}
+
+/**
+ * Validate the body of {@link SKY_SAFE_CONFIG_PATH}.
+ *
+ * Throws with the cause in the message, because that message is shown to the
+ * signer as the banner text. A silent fallback would leave the signer with an
+ * unlabelled transaction and no reason for it.
+ */
+export function parseSkySafeConfig(json: unknown): SkySafeConfig {
+  if (typeof json !== 'object' || json === null || Array.isArray(json)) {
+    throw new Error(`Deployment configuration ${SKY_SAFE_CONFIG_PATH} is not JSON`);
+  }
+  const value = (json as Record<string, unknown>).remoteAddressBookUrl;
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`Deployment configuration ${SKY_SAFE_CONFIG_PATH} has no remoteAddressBookUrl`);
+  }
+  return { remoteAddressBookUrl: value.trim() };
+}
+
+/**
+ * Resolve the address book URL against the page and check it is usable.
+ *
+ * Two rules, both fail-closed:
+ *   - The scheme must be http or https. A file:// page cannot fetch a book.
+ *   - The origin must match the page. The request carries same-origin
+ *     credentials, so a cross-origin URL reaches a service that cannot
+ *     authenticate the signer, and the labels would come from an origin the
+ *     signer never authorised.
+ *
+ * The thrown message is the banner text, so it names the two origins in full.
+ */
+export function checkRemoteAddressBookUrl(url: string, pageHref: string): URL {
+  const page = new URL(pageHref);
+  let resolved: URL;
+  try {
+    resolved = new URL(url, pageHref);
+  } catch {
+    throw new Error(`Remote address book URL "${url}" is not a valid URL.`);
+  }
+  if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') {
+    throw new Error(
+      `Remote address book URL must be http or https (got ${resolved.protocol}). ` +
+        `A copy opened from a file cannot load a remote address book.`
+    );
+  }
+  if (resolved.origin !== page.origin) {
+    throw new Error(
+      `Remote address book URL is on another origin (${resolved.origin}). ` +
+        `It must be on this page's origin (${page.origin}).`
+    );
+  }
+  return resolved;
+}

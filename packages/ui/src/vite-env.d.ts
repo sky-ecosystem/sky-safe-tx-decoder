@@ -1,12 +1,10 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /**
-   * Default URL for the remote address book. Baked in at build time so the
-   * hosted copy behind the auth proxy ships pointing at its own service; the
-   * signer can still change or clear it for the session on the Settings page.
-   */
-  readonly VITE_REMOTE_ADDRESS_BOOK_URL?: string;
+  // No app configuration is baked in at build time. The hosted copy must be
+  // byte-identical to the released artifact, so the remote address book URL is
+  // read at run time from /sky-safe-config.json instead.
+  readonly MODE: string;
 }
 
 interface ImportMeta {

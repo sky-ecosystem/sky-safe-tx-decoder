@@ -224,20 +224,31 @@ function MySafesTable({ safes }: { safes: AddressBookSafe[] }) {
 }
 
 function RemoteAddressBookSection() {
-  const { remoteBook, loadRemote, clearRemote } = useAddressBook();
+  const { remoteBook, loadRemote, clearRemote, deploymentUrl } = useAddressBook();
   const { remoteAddressBookUrl, setRemoteAddressBookUrl } = useSettings();
-  const url = remoteAddressBookUrl.trim();
+  const override = remoteAddressBookUrl.trim();
 
   return (
     <section>
       <h3 className="text-xl font-semibold mb-1">Remote address book</h3>
       <p className="text-sm text-gray-600 mb-3">
-        The URL is fetched with your browser's cookies for the same origin only. Nothing from it is stored beyond this
-        session. The offline build and a localhost dev server cannot use it unless the URL is same-origin with the page.
+        The hosted copy of this tool loads labels from the organisation&apos;s address book service on this origin. The
+        source name, entry count and fetch time are shown in the bar above; when the service cannot be reached every
+        address is shown as unknown and a red banner explains why. Nothing from the service is kept after you close the
+        tab.
+      </p>
+      <p className="text-sm text-gray-700 mb-3">
+        {deploymentUrl === null ? (
+          'Not configured by this deployment'
+        ) : (
+          <>
+            Configured by this deployment: <span className="font-mono break-all">{deploymentUrl}</span>
+          </>
+        )}
       </p>
       <div className="flex flex-wrap items-end gap-2">
         <label className="text-xs text-gray-600 flex-1 min-w-[20rem]">
-          Service URL
+          Override URL
           <input
             type="text"
             value={remoteAddressBookUrl}
@@ -248,8 +259,8 @@ function RemoteAddressBookSection() {
         </label>
         <button
           type="button"
-          disabled={url === ''}
-          onClick={() => void loadRemote(url, null)}
+          disabled={override === ''}
+          onClick={() => void loadRemote(override, null)}
           className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:bg-gray-300"
         >
           Load
@@ -266,6 +277,10 @@ function RemoteAddressBookSection() {
           Clear
         </button>
       </div>
+      <p className="mt-2 text-xs text-gray-600">
+        Only for a locally run copy of this tool. The URL must be on this page&apos;s origin; a local dev server needs a
+        proxy so the path is same-origin. Leave empty on the hosted copy.
+      </p>
       {remoteBook.status === 'error' && <p className="mt-2 text-sm font-semibold text-red-700">{remoteBook.error}</p>}
       {remoteBook.status === 'ok' && (
         <p className="mt-2 text-sm text-green-800">

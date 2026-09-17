@@ -8,7 +8,9 @@
  *
  *   - Remote address book (optional): the same labels fetched from a service.
  *     Canonical when present; the CSV book is merged under it and any
- *     disagreement is reported rather than resolved.
+ *     disagreement is reported rather than resolved. Its URL comes from the
+ *     deployment probe (/sky-safe-config.json) at run time, or from the manual
+ *     override on the Settings page.
  *
  * Keeping them separate avoids a sync trap: updating the managed book never
  * touches your Safes, and capturing a Safe never forces you to re-merge the
@@ -21,13 +23,16 @@ import { useMatch } from 'react-router-dom';
 import {
   buildAddressBookTag,
   buildMergedTag,
+  checkRemoteAddressBookUrl,
   classifyConfigCsv,
   clearAddressBookTags,
   mergeAddressBooks,
   parseAddressBookCsv,
   parseRemoteAddressBook,
+  parseSkySafeConfig,
   registerAddressTag,
   serializeAddressBookCsv,
+  SKY_SAFE_CONFIG_PATH,
   type AddressBookConflict,
   type AddressBookEntry,
   type AddressBookSafe,
@@ -78,13 +83,30 @@ const IDLE_REMOTE: RemoteBookSlot = {
   sourceName: null,
 };
 
+/**
+ * Where the /sky-safe-config.json probe got to.
+ *
+ *   - skipped:        the page is not http(s) (an offline copy on file://).
+ *   - probing:        the request is in flight; no URL decision yet.
+ *   - configured:     the deployment named a URL.
+ *   - not-configured: the deployment serves no config file (404).
+ *   - error:          the probe failed; the reason is in the remote slot.
+ */
+export type DeploymentConfigStatus = 'skipped' | 'probing' | 'configured' | 'not-configured' | 'error';
+
 interface AddressBookContextValue {
   /** Managed address book (labels). Read-only. */
   addressBook: AddressBookSlot | null;
   /** Remote address book fetched from the service. */
   remoteBook: RemoteBookSlot;
+  /** URL this deployment configured, or null when it configured none. */
+  deploymentUrl: string | null;
+  /** Where the deployment-configuration probe got to. */
+  configStatus: DeploymentConfigStatus;
   /** Fetch the remote address book. Never throws; failure lands in the slot. */
   loadRemote: (url: string, network: string | null) => Promise<void>;
+  /** Retry whatever failed: the fetch if a URL is in play, else the probe. */
+  retryRemote: () => void;
   clearRemote: () => void;
   /** Personal Safe shortcuts. Editable + exportable. */
   mySafes: MySafesSlot | null;
@@ -114,6 +136,8 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
   const [addressBook, setAddressBook] = useState<AddressBookSlot | null>(null);
   const [mySafes, setMySafes] = useState<MySafesSlot | null>(null);
   const [remoteBook, setRemoteBook] = useState<RemoteBookSlot>(IDLE_REMOTE);
+  const [deploymentUrl, setDeploymentUrl] = useState<string | null>(null);
+  const [configStatus, setConfigStatus] = useState<DeploymentConfigStatus>('probing');
 
   // The CSV book and the remote book are one list: merged so a disagreement
   // between them becomes a conflict on the tag rather than one silently chosen
@@ -133,29 +157,64 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
     for (const s of mySafes?.safes ?? []) registerAddressTag(s.address, buildAddressBookTag(s));
   }, [merged, mySafes]);
 
+  /**
+   * Fetch the remote address book. Never throws: every failure lands in the
+   * slot as `error` with a message that names the cause, because a signer who
+   * cannot see why the book is missing has no way to decide whether to sign.
+   *
+   * No result survives a failure and no result is cached: the slot is reset
+   * before the request and rewritten whole afterwards.
+   */
   const loadRemote = useCallback(async (url: string, network: string | null) => {
     setRemoteBook({ ...IDLE_REMOTE, status: 'loading', url, network });
+    let path = url;
     try {
-      const requestUrl = new URL(url, window.location.href);
+      // Origin and scheme first: its message is the whole explanation, and it
+      // stops a cross-origin request before it is made.
+      const requestUrl = checkRemoteAddressBookUrl(url, window.location.href);
+      path = requestUrl.pathname;
       if (network) requestUrl.searchParams.set('network', network);
-      const response = await fetch(requestUrl.toString(), {
-        // Same-origin cookies only: the hosted copy sits behind an auth proxy
-        // on its own origin. A cross-origin URL therefore gets no credentials
-        // and the proxy answers 401, which surfaces as the red banner.
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' },
-        cache: 'no-store',
-      });
-      if (!response.ok) {
-        throw new Error(`Remote address book: HTTP ${response.status}`);
+
+      let response: Response;
+      try {
+        response = await fetch(requestUrl.toString(), {
+          // Same-origin cookies only: the hosted copy sits behind an auth proxy
+          // on its own origin.
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+          cache: 'no-store',
+        });
+      } catch {
+        throw new Error(`Remote address book at ${path} could not be reached. The service may be down.`);
       }
+
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(
+          `Remote address book at ${path} refused the request (HTTP ${response.status}). ` +
+            `Sign in to the address book service in this browser, then retry.`
+        );
+      }
+      if (!response.ok) {
+        throw new Error(`Remote address book at ${path} returned HTTP ${response.status}.`);
+      }
+
+      // An auth proxy that answers 200 with an HTML sign-in page is the common
+      // failure. The content type names it before the body is read.
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!contentType.toLowerCase().includes('application/json')) {
+        throw new Error(
+          `Remote address book at ${path} returned ${contentType || 'no content type'} instead of JSON. ` +
+            `The URL probably points at a web page or a sign-in screen.`
+        );
+      }
+
       let json: unknown;
       try {
         json = await response.json();
       } catch {
-        // An auth proxy that answers 200 with an HTML login page lands here.
-        throw new Error('Remote address book: response was not JSON');
+        throw new Error(`Remote address book at ${path} returned a body that is not JSON.`);
       }
+
       const result = parseRemoteAddressBook(json, network ? { network } : {});
       setRemoteBook({
         status: 'ok',
@@ -181,6 +240,75 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
       });
     }
   }, []);
+
+  /**
+   * Read the deployment configuration from the same-origin probe path.
+   *
+   * The released artifact carries no URL, so the hosted copy is byte-identical
+   * to it and this probe is the only configuration. A 404 means the deployment
+   * configured nothing: the connector stays idle and says nothing. Every other
+   * outcome is an error the signer can read.
+   */
+  const probeConfig = useCallback(async () => {
+    const protocol = window.location.protocol;
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      // An offline copy opened from disk. Nothing to probe, nothing to say.
+      setDeploymentUrl(null);
+      setConfigStatus('skipped');
+      return;
+    }
+    setConfigStatus('probing');
+    try {
+      let response: Response;
+      try {
+        response = await fetch(SKY_SAFE_CONFIG_PATH, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+        });
+      } catch {
+        throw new Error(`Deployment configuration ${SKY_SAFE_CONFIG_PATH} could not be reached.`);
+      }
+      if (response.status === 404) {
+        setDeploymentUrl(null);
+        setConfigStatus('not-configured');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Deployment configuration ${SKY_SAFE_CONFIG_PATH} returned HTTP ${response.status}`);
+      }
+      let json: unknown;
+      try {
+        json = await response.json();
+      } catch {
+        throw new Error(`Deployment configuration ${SKY_SAFE_CONFIG_PATH} is not JSON`);
+      }
+      const config = parseSkySafeConfig(json);
+      setDeploymentUrl(config.remoteAddressBookUrl);
+      setConfigStatus('configured');
+    } catch (e) {
+      setDeploymentUrl(null);
+      setConfigStatus('error');
+      setRemoteBook({
+        ...IDLE_REMOTE,
+        status: 'error',
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    void probeConfig();
+  }, [probeConfig]);
+
+  const retryRemote = useCallback(() => {
+    // A failure before any URL was known is a probe failure; retry that.
+    if (remoteBook.url === '') {
+      void probeConfig();
+      return;
+    }
+    void loadRemote(remoteBook.url, remoteBook.network);
+  }, [remoteBook.url, remoteBook.network, loadRemote, probeConfig]);
 
   const clearRemote = useCallback(() => setRemoteBook(IDLE_REMOTE), []);
 
@@ -266,7 +394,10 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
       addressBook,
       mySafes,
       remoteBook: { ...remoteBook, conflicts: merged.conflicts },
+      deploymentUrl,
+      configStatus,
       loadRemote,
+      retryRemote,
       clearRemote,
       loadAddressBook,
       loadMySafes,
@@ -281,8 +412,11 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
       addressBook,
       mySafes,
       remoteBook,
+      deploymentUrl,
+      configStatus,
       merged,
       loadRemote,
+      retryRemote,
       clearRemote,
       loadAddressBook,
       loadMySafes,
@@ -300,27 +434,31 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
 /**
  * Drives the automatic remote fetch. Rendered INSIDE the router (App.tsx),
  * because AddressBookProvider sits outside HashRouter and so cannot read the
- * route itself. Re-fetches when the configured URL or the route network
+ * route itself. Re-fetches when the effective URL or the route network
  * changes, so a per-network book follows the Safe being reviewed.
+ *
+ * The effective URL is the manual override when the signer set one, else the
+ * URL this deployment configured.
  *
  * Renders nothing.
  */
 export function RemoteAddressBookLoader() {
-  const { remoteBook, loadRemote } = useAddressBook();
+  const { remoteBook, loadRemote, deploymentUrl } = useAddressBook();
   const { remoteAddressBookUrl } = useSettings();
   const match = useMatch('/safe/:network/*');
   const network = match?.params.network ?? null;
+  const override = remoteAddressBookUrl.trim();
+  const effectiveUrl = override !== '' ? override : (deploymentUrl ?? '');
 
   useEffect(() => {
-    if (remoteAddressBookUrl === '') return;
+    if (effectiveUrl === '') return;
     if (remoteBook.status === 'loading') return;
     // A failed fetch keeps its url/network, so this does not retry in a loop.
     // Retry is a deliberate act: the button on the bar or on Settings.
-    const stale =
-      remoteBook.status === 'idle' || remoteBook.url !== remoteAddressBookUrl || remoteBook.network !== network;
+    const stale = remoteBook.status === 'idle' || remoteBook.url !== effectiveUrl || remoteBook.network !== network;
     if (!stale) return;
-    void loadRemote(remoteAddressBookUrl, network);
-  }, [remoteAddressBookUrl, network, remoteBook.status, remoteBook.url, remoteBook.network, loadRemote]);
+    void loadRemote(effectiveUrl, network);
+  }, [effectiveUrl, network, remoteBook.status, remoteBook.url, remoteBook.network, loadRemote]);
 
   return null;
 }

@@ -164,6 +164,23 @@ with or drift stale, so each session you re-load fresh files.
 - Because the address book and My Safes are separate files, you can update the
   managed address book anytime without losing your Safes.
 
+#### Remote address book (hosted copy)
+
+A deployment can serve address labels from a service on its own origin instead
+of a CSV file. The build carries no configuration, so the hosted copy is
+byte-identical to the released artifact: on startup the page reads
+`/sky-safe-config.json` from its own origin and takes the address book URL from
+it. A deployment that serves no such file loads no labels and says nothing.
+
+Nothing from the service is persisted. A failed fetch clears every remote label,
+shows a red banner naming the cause, and leaves every address unknown.
+
+The Settings page carries a manual override for a locally run copy. The override
+must be on the page's origin.
+
+See [`docs/address-book-api.md`](docs/address-book-api.md) for the contract a
+service must implement.
+
 ### From Source
 
 ```bash
