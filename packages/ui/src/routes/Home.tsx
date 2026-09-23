@@ -88,6 +88,27 @@ const PROTOCOL_DECODERS: ProtocolDecoder[] = [
       },
     ],
   },
+  {
+    name: 'Sky Protocol — PAU AdministeredAgent',
+    address: '0xdBD17832df0e57b1732cE1C84c652E820e549BAa',
+    summary:
+      'Parallelized Allocation Unit — the allocator entry point for Grove and the second active PAU. A PAU Controller is a diamond: the selector a Safe signs is replaced in transit and appears in no published ABI, so the Safe Transaction Service and Sourcify render every allocator call as undecodable. This decoder resolves each call through a per-Controller dispatch table, verified against the chain before anything is shown, and renders the executing facet function, both selectors, the facet, the integration id, and the arguments. Registered for the Grove agent above and for 0x1837505D104F7a6D8b7e19452610B0A3D652EF12.',
+    signatureCount: 18,
+    functions: [
+      { group: 'Batch', names: 'batchCall (one card per forwarded Controller call)' },
+      { group: 'USDSFacet', names: 'mint, burn, setVault' },
+      { group: 'PSMFacet', names: 'swapUSDCToUSDS, swapUSDSToUSDC' },
+      { group: 'BasinFacet', names: 'deposit, withdraw' },
+      {
+        group: 'UniswapV3Facet',
+        names:
+          'swap, addLiquidity, removeLiquidity, setMaxSlippage, setMaxTickDelta, setTWAPSecondsAgo, setLiquidityLowerTickBound, setLiquidityUpperTickBound',
+      },
+      { group: 'AaveFacet', names: 'deposit, withdraw, setMaxSlippage' },
+      { group: 'Views', names: 'every wired view and pure function also decodes' },
+    ],
+    docsUrl: 'https://github.com/sky-ecosystem/diamond-pau',
+  },
 ];
 
 function DecoderCard({ decoder }: { decoder: ProtocolDecoder }) {
