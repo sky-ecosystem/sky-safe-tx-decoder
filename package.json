@@ -1,6 +1,6 @@
 {
   "name": "sky-safe-tx-decoder",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "description": "TypeScript-based Safe multisig transaction hash calculator and decoder with custom protocol support",
   "keywords": [
