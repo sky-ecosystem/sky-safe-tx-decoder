@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here.
 
+## [0.4.2] — 2026-09-23
+
+The home page now lists the PAU decoder.
+
+### Fixed
+
+- **The PAU decoder was missing from the home page.** The decoder has run
+  since 0.4.0, but the list of protocol decoders on the home page, which is the
+  only place a signer can check whether a contract is covered, did not name it.
+  A signer whose allocator calls decoded had no way to tell that this was by
+  design rather than by accident. The card names the two AdministeredAgents,
+  the five facets and their state-changing functions, and the live
+  verification step.
+
 ## [0.4.1] — 2026-09-09
 
 One fix to the transaction lifecycle log, reported by a signer.
