@@ -224,6 +224,13 @@ export const SKY_SAFE_CONFIG_PATH = '/sky-safe-config.json';
 export interface SkySafeConfig {
   /** URL of the address book list endpoint. Same-origin with the page. */
   remoteAddressBookUrl: string;
+  /**
+   * Page where a person opens the address book, for the "Open address book"
+   * link. Optional. Same-origin with the page; a cross-origin value is dropped
+   * at resolve time rather than failing the configuration, because a bad link
+   * must not cost the signer the labels.
+   */
+  addressBookPageUrl: string | null;
 }
 
 /**
@@ -241,7 +248,30 @@ export function parseSkySafeConfig(json: unknown): SkySafeConfig {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new Error(`Deployment configuration ${SKY_SAFE_CONFIG_PATH} has no remoteAddressBookUrl`);
   }
-  return { remoteAddressBookUrl: value.trim() };
+  const page = (json as Record<string, unknown>).addressBookPageUrl;
+  const addressBookPageUrl = typeof page === 'string' && page.trim() !== '' ? page.trim() : null;
+  return { remoteAddressBookUrl: value.trim(), addressBookPageUrl };
+}
+
+/**
+ * Resolve the address book page link against the page, same-origin only.
+ *
+ * Returns null instead of throwing: the link is a convenience, and a
+ * deployment that misconfigures it should lose the link, not the labels. The
+ * same-origin rule is the same one the list URL follows, so a config cannot
+ * send a signer to another site under the tool's own heading.
+ */
+export function resolveAddressBookPageUrl(url: string | null, pageHref: string): string | null {
+  if (url === null) return null;
+  try {
+    const page = new URL(pageHref);
+    const resolved = new URL(url, pageHref);
+    if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return null;
+    if (resolved.origin !== page.origin) return null;
+    return resolved.toString();
+  } catch {
+    return null;
+  }
 }
 
 /**

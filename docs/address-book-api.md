@@ -8,11 +8,11 @@ On load over `http` or `https` the decoder requests `GET /sky-safe-config.json` 
 
 | Response | Effect |
 | --- | --- |
-| 200 with `{ "remoteAddressBookUrl": "/api/v1/addresses" }` | Labels load from that URL |
+| 200 with `{ "remoteAddressBookUrl": "/api/v1/addresses", "addressBookPageUrl": "/" }` | Labels load from the first URL. The second, optional, is the page a person opens to view or manage the book; the decoder shows it as a link |
 | 404 | No labels, no message |
 | Anything else | Error state: red banner, no labels |
 
-`remoteAddressBookUrl` must be on the same origin as the page. A cross-origin URL is refused before any request.
+Both URLs must be on the same origin as the page. A cross-origin `remoteAddressBookUrl` is refused before any request. A cross-origin `addressBookPageUrl` is dropped and no link is shown; it never affects the labels.
 
 ## List endpoint
 

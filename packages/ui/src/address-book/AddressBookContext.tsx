@@ -30,6 +30,7 @@ import {
   parseAddressBookCsv,
   parseRemoteAddressBook,
   parseSkySafeConfig,
+  resolveAddressBookPageUrl,
   registerAddressTag,
   serializeAddressBookCsv,
   SKY_SAFE_CONFIG_PATH,
@@ -101,6 +102,8 @@ interface AddressBookContextValue {
   remoteBook: RemoteBookSlot;
   /** URL this deployment configured, or null when it configured none. */
   deploymentUrl: string | null;
+  /** Same-origin page where a person opens the address book, or null. */
+  addressBookPageUrl: string | null;
   /** Where the deployment-configuration probe got to. */
   configStatus: DeploymentConfigStatus;
   /** Fetch the remote address book. Never throws; failure lands in the slot. */
@@ -137,6 +140,7 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
   const [mySafes, setMySafes] = useState<MySafesSlot | null>(null);
   const [remoteBook, setRemoteBook] = useState<RemoteBookSlot>(IDLE_REMOTE);
   const [deploymentUrl, setDeploymentUrl] = useState<string | null>(null);
+  const [addressBookPageUrl, setAddressBookPageUrl] = useState<string | null>(null);
   const [configStatus, setConfigStatus] = useState<DeploymentConfigStatus>('probing');
 
   // The CSV book and the remote book are one list: merged so a disagreement
@@ -254,6 +258,7 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
     if (protocol !== 'http:' && protocol !== 'https:') {
       // An offline copy opened from disk. Nothing to probe, nothing to say.
       setDeploymentUrl(null);
+      setAddressBookPageUrl(null);
       setConfigStatus('skipped');
       return;
     }
@@ -271,6 +276,7 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
       }
       if (response.status === 404) {
         setDeploymentUrl(null);
+        setAddressBookPageUrl(null);
         setConfigStatus('not-configured');
         return;
       }
@@ -285,9 +291,11 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
       }
       const config = parseSkySafeConfig(json);
       setDeploymentUrl(config.remoteAddressBookUrl);
+      setAddressBookPageUrl(resolveAddressBookPageUrl(config.addressBookPageUrl, window.location.href));
       setConfigStatus('configured');
     } catch (e) {
       setDeploymentUrl(null);
+      setAddressBookPageUrl(null);
       setConfigStatus('error');
       setRemoteBook({
         ...IDLE_REMOTE,
@@ -395,6 +403,7 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
       mySafes,
       remoteBook: { ...remoteBook, conflicts: merged.conflicts },
       deploymentUrl,
+      addressBookPageUrl,
       configStatus,
       loadRemote,
       retryRemote,
@@ -413,6 +422,7 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
       mySafes,
       remoteBook,
       deploymentUrl,
+      addressBookPageUrl,
       configStatus,
       merged,
       loadRemote,
