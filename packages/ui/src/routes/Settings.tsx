@@ -1,12 +1,14 @@
 /**
- * Settings page — manage the in-session config.
+ * Settings page — the in-session config, in the order a signer cares about.
  *
- *   - My Safes (personal): add / edit label / remove, and export. Adding here or
- *     via the capture banner only updates the session; export to save to CSV.
- *   - Address book (managed): read-only; replace by loading a fresh file.
+ *   - Address book: the organisation's book on this origin when the deployment
+ *     configured one (source, count, fetch time, a link to open it, Reload);
+ *     otherwise the manual URL for a locally run copy.
+ *   - CSV address book: read-only; on a hosted copy it is a comparison file.
+ *   - My Safes (personal): add / edit label / remove, and export.
+ *   - Decoding: the Sourcify fallback.
  *
- * Config is session-only (no localStorage); the CSV files you keep externally
- * are the source of truth. Drag them onto the bar above to load each session.
+ * Config is session-only (no localStorage). Nothing survives the tab.
  */
 
 import { useState } from 'react';
@@ -223,32 +225,20 @@ function MySafesTable({ safes }: { safes: AddressBookSafe[] }) {
   );
 }
 
-function RemoteAddressBookSection() {
-  const { remoteBook, loadRemote, clearRemote, deploymentUrl } = useAddressBook();
+function formatFetchedAt(d: Date): string {
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** The manual URL for a locally run copy: input, Load, Clear, and the rule. */
+function OverrideUrlFields() {
+  const { loadRemote, clearRemote } = useAddressBook();
   const { remoteAddressBookUrl, setRemoteAddressBookUrl } = useSettings();
   const override = remoteAddressBookUrl.trim();
-
   return (
-    <section>
-      <h3 className="text-xl font-semibold mb-1">Remote address book</h3>
-      <p className="text-sm text-gray-600 mb-3">
-        The hosted copy of this tool loads labels from the organisation&apos;s address book service on this origin. The
-        source name, entry count and fetch time are shown in the bar above; when the service cannot be reached every
-        address is shown as unknown and a red banner explains why. Nothing from the service is kept after you close the
-        tab.
-      </p>
-      <p className="text-sm text-gray-700 mb-3">
-        {deploymentUrl === null ? (
-          'Not configured by this deployment'
-        ) : (
-          <>
-            Configured by this deployment: <span className="font-mono break-all">{deploymentUrl}</span>
-          </>
-        )}
-      </p>
+    <>
       <div className="flex flex-wrap items-end gap-2">
         <label className="text-xs text-gray-600 flex-1 min-w-[20rem]">
-          Override URL
+          Address book URL
           <input
             type="text"
             value={remoteAddressBookUrl}
@@ -278,63 +268,140 @@ function RemoteAddressBookSection() {
         </button>
       </div>
       <p className="mt-2 text-xs text-gray-600">
-        Only for a locally run copy of this tool. The URL must be on this page&apos;s origin; a local dev server needs a
-        proxy so the path is same-origin. Leave empty on the hosted copy.
+        The URL must be on this page&apos;s origin. A local dev server needs a proxy so the path is same-origin.
       </p>
-      {remoteBook.status === 'error' && <p className="mt-2 text-sm font-semibold text-red-700">{remoteBook.error}</p>}
-      {remoteBook.status === 'ok' && (
-        <p className="mt-2 text-sm text-green-800">
-          {remoteBook.entries.length} entries, {remoteBook.skipped.length} skipped, {remoteBook.conflicts.length}{' '}
-          conflicts with the CSV address book.
-        </p>
+    </>
+  );
+}
+
+function AddressBookSection() {
+  const { remoteBook, loadRemote, deploymentUrl, addressBookPageUrl } = useAddressBook();
+  const configured = deploymentUrl !== null;
+
+  return (
+    <section>
+      <h3 className="text-xl font-semibold mb-1">Address book</h3>
+      {configured ? (
+        <>
+          <p className="text-sm text-gray-600 mb-3">
+            This deployment loads labels from the organisation&apos;s address book on this origin. When it cannot be
+            reached, every address is shown as unknown and a red banner says why.
+          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 rounded border border-gray-300 bg-white text-sm">
+            <span className="text-gray-800">
+              {remoteBook.status === 'ok' && (
+                <>
+                  <span className="font-mono break-all">{remoteBook.sourceName ?? remoteBook.url}</span>
+                  {` · ${remoteBook.entries.length} entries`}
+                  {remoteBook.skipped.length > 0 && <>{`, ${remoteBook.skipped.length} skipped`}</>}
+                  {remoteBook.conflicts.length > 0 && <>{`, ${remoteBook.conflicts.length} conflicts with the CSV file`}</>}
+                  {remoteBook.fetchedAt && <>{` · fetched ${formatFetchedAt(remoteBook.fetchedAt)}`}</>}
+                </>
+              )}
+              {remoteBook.status === 'loading' && 'Loading'}
+              {remoteBook.status === 'error' && <span className="font-semibold text-red-700">{remoteBook.error}</span>}
+              {remoteBook.status === 'idle' && (
+                <>
+                  Configured at <span className="font-mono break-all">{deploymentUrl}</span>
+                </>
+              )}
+            </span>
+            <span className="flex items-center gap-3">
+              {addressBookPageUrl && (
+                <a href={addressBookPageUrl} className="text-blue-700 hover:underline whitespace-nowrap">
+                  Open address book ↗
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => void loadRemote(remoteBook.url || deploymentUrl, remoteBook.network)}
+                className="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-100"
+              >
+                Reload
+              </button>
+            </span>
+          </div>
+          <details className="mt-3 text-sm">
+            <summary className="cursor-pointer text-gray-700">Use a different URL (locally run copy only)</summary>
+            <div className="mt-2">
+              <OverrideUrlFields />
+            </div>
+          </details>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-gray-600 mb-3">
+            Not configured by this deployment. A locally run copy can load the organisation&apos;s address book for
+            this session from a URL on this origin.
+          </p>
+          <OverrideUrlFields />
+          {remoteBook.status === 'error' && <p className="mt-2 text-sm font-semibold text-red-700">{remoteBook.error}</p>}
+          {remoteBook.status === 'ok' && (
+            <p className="mt-2 text-sm text-green-800">
+              {remoteBook.entries.length} entries, {remoteBook.skipped.length} skipped, {remoteBook.conflicts.length}{' '}
+              conflicts with the CSV address book.
+            </p>
+          )}
+        </>
       )}
     </section>
   );
 }
 
 export default function Settings() {
-  const { addressBook, mySafes, exportMySafes } = useAddressBook();
+  const { addressBook, mySafes, exportMySafes, deploymentUrl } = useAddressBook();
   const { sourcifyFallback, setSourcifyFallback } = useSettings();
+  const hosted = deploymentUrl !== null;
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
       <div>
         <h2 className="text-3xl font-bold mb-2">Settings</h2>
         <p className="text-gray-600">
-          Manage the config loaded this session. Changes are in memory only — export to CSV to save them. The CSV files
-          you keep externally are the source of truth; drag them onto the bar above to load them each session.
+          {hosted
+            ? 'Settings live in memory for this session. Nothing is kept after you close the tab.'
+            : 'Settings live in memory for this session. The CSV files you keep are the source of truth; drag them onto the bar above to load them.'}
         </p>
       </div>
 
-      {/* Decoding — Sourcify fallback */}
-      <section>
-        <h3 className="text-xl font-semibold mb-1">Decoding</h3>
-        <label className="flex items-start gap-3 mt-3 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={sourcifyFallback}
-            onChange={(e) => setSourcifyFallback(e.target.checked)}
-            className="mt-1 h-4 w-4"
-          />
-          <span className="text-sm">
-            <span className="font-semibold">Sourcify ABI fallback</span>
-            <span className="block text-gray-600 mt-1">
-              When the Safe Transaction Service returns no decoded data for a call, fetch the contract's verified ABI
-              from Sourcify and decode with it — following an EIP-1967 proxy to its implementation when needed. If the
-              contract is verified on a block explorer (e.g. Etherscan) but not yet on Sourcify, this asks Sourcify to
-              import it. The result is always re-encoded and byte-compared against the raw calldata before it is shown —
-              the same check applied to Safe API decodings.
-            </span>
-            <span className="block text-amber-700 mt-1">
-              On by default. It sends the contract address to sourcify.dev, revealing which contract — and so which
-              transaction — you are inspecting. Turn it off to avoid that request; the offline build then makes no call
-              to Sourcify.
-            </span>
-          </span>
-        </label>
-      </section>
+      <AddressBookSection />
 
-      <RemoteAddressBookSection />
+      {/* CSV address book — read-only; a comparison file on the hosted copy */}
+      <section>
+        <h3 className="text-xl font-semibold mb-1">CSV address book</h3>
+        {addressBook ? (
+          <>
+            <p className="text-sm text-gray-600 mb-3">
+              <span className="font-mono break-all">{addressBook.filename}</span>
+              {hosted ? ', compared against the address book above. ' : '. '}
+              Replace it by loading another file on the bar above.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <h4 className="text-sm font-semibold text-green-800 mb-2">
+                  Active ({addressBook.entries.filter((e) => e.status === 'active').length})
+                </h4>
+                <EntryTable entries={addressBook.entries.filter((e) => e.status === 'active')} />
+              </div>
+              {addressBook.entries.some((e) => e.status === 'inactive') && (
+                <div>
+                  <h4 className="text-sm font-semibold text-red-800 mb-2">
+                    Inactive ({addressBook.entries.filter((e) => e.status === 'inactive').length})
+                  </h4>
+                  <EntryTable entries={addressBook.entries.filter((e) => e.status === 'inactive')} />
+                </div>
+              )}
+            </div>
+            <SkippedRows skipped={addressBook.skipped} />
+          </>
+        ) : (
+          <p className="text-sm text-gray-500">
+            {hosted
+              ? 'None loaded. To compare a CSV file against the address book above, drag it onto the bar.'
+              : 'None loaded. Drag your CSV address book onto the bar above.'}
+          </p>
+        )}
+      </section>
 
       {/* My Safes — add / edit / remove + export */}
       <section>
@@ -359,36 +426,30 @@ export default function Settings() {
         {mySafes && <SkippedRows skipped={mySafes.skipped} />}
       </section>
 
-      {/* Address book — managed, read-only */}
+      {/* Decoding — Sourcify fallback */}
       <section>
-        <h3 className="text-xl font-semibold mb-1">Address book (managed)</h3>
-        <p className="text-sm text-gray-600 mb-3">
-          Read-only labels for known addresses. Managed externally — replace it by loading a fresh file on the bar
-          above.
-        </p>
-        {addressBook ? (
-          <>
-            <div className="space-y-4">
-              <div>
-                <h4 className="text-sm font-semibold text-green-800 mb-2">
-                  Active ({addressBook.entries.filter((e) => e.status === 'active').length})
-                </h4>
-                <EntryTable entries={addressBook.entries.filter((e) => e.status === 'active')} />
-              </div>
-              {addressBook.entries.some((e) => e.status === 'inactive') && (
-                <div>
-                  <h4 className="text-sm font-semibold text-red-800 mb-2">
-                    Inactive ({addressBook.entries.filter((e) => e.status === 'inactive').length})
-                  </h4>
-                  <EntryTable entries={addressBook.entries.filter((e) => e.status === 'inactive')} />
-                </div>
-              )}
-            </div>
-            <SkippedRows skipped={addressBook.skipped} />
-          </>
-        ) : (
-          <p className="text-sm text-gray-500">No address book loaded. Drag your managed CSV onto the bar above.</p>
-        )}
+        <h3 className="text-xl font-semibold mb-1">Decoding</h3>
+        <label className="flex items-start gap-3 mt-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={sourcifyFallback}
+            onChange={(e) => setSourcifyFallback(e.target.checked)}
+            className="mt-1 h-4 w-4"
+          />
+          <span className="text-sm">
+            <span className="font-semibold">Sourcify ABI fallback</span>
+            <span className="block text-gray-600 mt-1">
+              When the Safe Transaction Service returns no decoded data for a call, fetch the contract&apos;s verified
+              ABI from Sourcify and decode with it, following an EIP-1967 proxy to its implementation when needed. The
+              result is re-encoded and byte-compared against the raw calldata before it is shown, the same check applied
+              to Safe API decodings.
+            </span>
+            <span className="block text-amber-700 mt-1">
+              On by default. The request tells sourcify.dev which contract, and so which transaction, you are
+              inspecting. Turn it off to make no such request.
+            </span>
+          </span>
+        </label>
       </section>
     </div>
   );

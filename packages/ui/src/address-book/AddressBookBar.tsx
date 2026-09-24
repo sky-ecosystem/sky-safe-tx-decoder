@@ -154,7 +154,7 @@ export function AddressBookBar() {
  * full-width banner below the bar carries the whole message.
  */
 function RemoteBookColumn({ undecided }: { undecided: boolean }) {
-  const { remoteBook, loadRemote } = useAddressBook();
+  const { remoteBook, loadRemote, addressBookPageUrl } = useAddressBook();
   const [showBrowser, setShowBrowser] = useState(false);
   const loading = undecided || remoteBook.status === 'loading';
 
@@ -193,6 +193,7 @@ function RemoteBookColumn({ undecided }: { undecided: boolean }) {
           loadedAt={remoteBook.fetchedAt ?? new Date()}
           entries={remoteBook.entries}
           skipped={remoteBook.skipped}
+          manageHref={addressBookPageUrl}
           onClose={() => setShowBrowser(false)}
         />
       )}

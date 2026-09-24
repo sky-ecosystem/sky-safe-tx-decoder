@@ -11,6 +11,7 @@ import {
   mergeAddressBooks,
   parseRemoteAddressBook,
   parseSkySafeConfig,
+  resolveAddressBookPageUrl,
 } from './address-book-remote.js';
 import type { AddressBookEntry } from './address-book.js';
 
@@ -228,18 +229,36 @@ describe('parseSkySafeConfig', () => {
   it('accepts a body with a remoteAddressBookUrl string', () => {
     expect(parseSkySafeConfig({ remoteAddressBookUrl: '/api/v1/addresses' })).toEqual({
       remoteAddressBookUrl: '/api/v1/addresses',
+      addressBookPageUrl: null,
     });
   });
 
   it('trims surrounding whitespace', () => {
     expect(parseSkySafeConfig({ remoteAddressBookUrl: '  /api/v1/addresses  ' })).toEqual({
       remoteAddressBookUrl: '/api/v1/addresses',
+      addressBookPageUrl: null,
     });
   });
 
   it('ignores other fields', () => {
     expect(parseSkySafeConfig({ remoteAddressBookUrl: '/api/v1/addresses', other: 1 })).toEqual({
       remoteAddressBookUrl: '/api/v1/addresses',
+      addressBookPageUrl: null,
+    });
+  });
+
+  it('carries an optional addressBookPageUrl, trimmed, and treats blank as absent', () => {
+    expect(parseSkySafeConfig({ remoteAddressBookUrl: '/api/v1/addresses', addressBookPageUrl: ' / ' })).toEqual({
+      remoteAddressBookUrl: '/api/v1/addresses',
+      addressBookPageUrl: '/',
+    });
+    expect(parseSkySafeConfig({ remoteAddressBookUrl: '/api/v1/addresses', addressBookPageUrl: '' })).toEqual({
+      remoteAddressBookUrl: '/api/v1/addresses',
+      addressBookPageUrl: null,
+    });
+    expect(parseSkySafeConfig({ remoteAddressBookUrl: '/api/v1/addresses', addressBookPageUrl: 7 })).toEqual({
+      remoteAddressBookUrl: '/api/v1/addresses',
+      addressBookPageUrl: null,
     });
   });
 
@@ -327,5 +346,30 @@ describe('mergeAddressBooks with an empty remote list', () => {
     const csv = [csvEntry({ address: USDS, origin: 'remote' })];
     const { entries } = mergeAddressBooks(csv, []);
     expect(entries[0]!.origin).toBe('remote');
+  });
+});
+
+describe('resolveAddressBookPageUrl', () => {
+  const page = 'https://book.example.com/decoder/#/safe/ethereum/0xabc/tx/1';
+
+  it('resolves a relative path against the page origin', () => {
+    expect(resolveAddressBookPageUrl('/', page)).toBe('https://book.example.com/');
+    expect(resolveAddressBookPageUrl('/addresses', page)).toBe('https://book.example.com/addresses');
+  });
+
+  it('accepts an absolute same-origin URL', () => {
+    expect(resolveAddressBookPageUrl('https://book.example.com/', page)).toBe('https://book.example.com/');
+  });
+
+  it('drops a cross-origin, non-http, invalid, or absent value', () => {
+    expect(resolveAddressBookPageUrl('https://evil.example.com/', page)).toBeNull();
+    expect(resolveAddressBookPageUrl('http://book.example.com/', page)).toBeNull();
+    expect(resolveAddressBookPageUrl('javascript:alert(1)', page)).toBeNull();
+    expect(resolveAddressBookPageUrl('http://', page)).toBeNull();
+    expect(resolveAddressBookPageUrl(null, page)).toBeNull();
+  });
+
+  it('returns null when the page is not http or https', () => {
+    expect(resolveAddressBookPageUrl('/', 'file:///Users/me/index.html')).toBeNull();
   });
 });
