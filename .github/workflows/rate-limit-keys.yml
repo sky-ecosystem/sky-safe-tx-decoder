@@ -6,9 +6,10 @@ name: Unresolved rate-limit keys
 # risk. Correct, but nothing surfaces that the table needs updating.
 #
 # This checks the decoder against what is actually set on chain and opens an
-# issue per unresolved key. It never fails the run: an unreachable RPC or a
-# missing secret exits quietly, because a check that goes red on infrastructure
-# noise is a check people mute.
+# issue per unresolved key. An unreachable RPC or a missing ETH_RPC_URL secret
+# exits quietly, because a check that goes red on infrastructure noise is a
+# check people mute. A key it cannot file as an issue fails the run, with the
+# issue text in the log and the job summary: the failed run is then the alert.
 on:
   schedule:
     - cron: '17 6 * * *' # daily, off the hour to avoid the scheduling spike

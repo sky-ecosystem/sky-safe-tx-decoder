@@ -12,9 +12,10 @@ name: PAU dispatch table drift
 # It NEVER commits and NEVER auto-updates the table. Regenerating the table is a
 # reviewed change, because the table is what the decoder's labels rest on.
 #
-# It never fails the run either: an unreachable RPC or a missing secret exits
-# quietly, because a check that goes red on infrastructure noise is a check
-# people mute.
+# An unreachable RPC or a missing ETH_RPC_URL secret exits quietly, because a
+# check that goes red on infrastructure noise is a check people mute. A
+# difference it cannot file as an issue fails the run, with the issue text in
+# the log and the job summary: the failed run is then the alert.
 on:
   schedule:
     - cron: '43 6 * * *' # daily, off the hour and clear of the rate-limit-key check

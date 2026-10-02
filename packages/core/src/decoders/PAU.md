@@ -391,7 +391,7 @@ The issue body separates two cases.
 Every affected selector is listed with both the frozen and the on-chain facet, delegate
 selector, function and integration id, in full.
 
-The job never fails the run. An unreachable RPC or a missing secret exits quietly.
+An unreachable RPC or a missing `ETH_RPC_URL` secret exits quietly and does not fail the run. A difference that cannot be filed as an issue fails the run, and the issue text appears in the log and the job summary.
 
 Run the same diff by hand with:
 

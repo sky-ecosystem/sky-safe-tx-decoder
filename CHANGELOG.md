@@ -4,6 +4,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A finding the daily checks could not file as an issue produced a passing run.** The PAU dispatch table check and the rate-limit key check read a failed issue search as "already reported", and issues are disabled on this repository, so a real finding notified nobody. Such a finding now fails the run and puts the issue title and body in the log, in an error annotation, and in the job summary. An unreachable RPC or Sourcify still exits 0 and reports nothing.
+
 ### Security
 
 - **Dependencies upgraded to close open Dependabot advisories.** React Router and viem are the only upgraded packages in the web UI bundle. viem is also a runtime dependency of the published core and CLI packages, and it brings ws. The other packages are development and build tooling.
