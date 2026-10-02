@@ -391,7 +391,7 @@ The issue body separates two cases.
 Every affected selector is listed with both the frozen and the on-chain facet, delegate
 selector, function and integration id, in full.
 
-An unreachable RPC or a missing `ETH_RPC_URL` secret exits quietly and does not fail the run. A difference that cannot be filed as an issue fails the run, and the issue text appears in the log and the job summary.
+An unreachable RPC or a missing `ETH_RPC_URL` secret exits quietly and does not fail the run. A difference that cannot be filed as an issue fails one run, and the issue text appears in the log and the job summary. Later runs show the same difference as a warning until it changes or goes away.
 
 Run the same diff by hand with:
 

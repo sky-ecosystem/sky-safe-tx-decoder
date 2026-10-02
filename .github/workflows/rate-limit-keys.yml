@@ -8,8 +8,9 @@ name: Unresolved rate-limit keys
 # This checks the decoder against what is actually set on chain and opens an
 # issue per unresolved key. An unreachable RPC or a missing ETH_RPC_URL secret
 # exits quietly, because a check that goes red on infrastructure noise is a
-# check people mute. A key it cannot file as an issue fails the run, with the
-# issue text in the log and the job summary: the failed run is then the alert.
+# check people mute. A key it cannot file as an issue fails one run, with the
+# issue text in the log and the job summary: that failed run is the alert.
+# Later runs show the same key as a warning until it resolves.
 on:
   schedule:
     - cron: '17 6 * * *' # daily, off the hour to avoid the scheduling spike
@@ -47,8 +48,29 @@ jobs:
       - name: Build core
         run: pnpm --filter @shield3/sky-safe-core build
 
+      # The keys that already failed a run, so each fails only one. Restore and
+      # save are separate steps because actions/cache skips its save when the
+      # job fails, and the failing run is the one that must save. Cache entries
+      # are immutable: each run saves under its own key, and the next run
+      # restores the newest by prefix.
+      - name: Restore alert state
+        uses: actions/cache/restore@v4
+        with:
+          path: drift-state.json
+          key: drift-state-rate-limit-keys-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: drift-state-rate-limit-keys-
+
       - name: Check for unresolved keys
         env:
           ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/check-rate-limit-keys.mjs --issues
+        run: node scripts/check-rate-limit-keys.mjs --issues --state drift-state.json
+
+      # The script writes no state on a transport problem, so on a first run
+      # there may be nothing to save.
+      - name: Save alert state
+        if: always() && hashFiles('drift-state.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: drift-state.json
+          key: drift-state-rate-limit-keys-${{ github.run_id }}-${{ github.run_attempt }}
