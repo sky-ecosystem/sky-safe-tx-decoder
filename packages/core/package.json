@@ -42,7 +42,7 @@
     "access": "public"
   },
   "dependencies": {
-    "viem": "2.52.2"
+    "viem": "2.54.2"
   },
   "devDependencies": {
     "@types/node": "20.19.41",
