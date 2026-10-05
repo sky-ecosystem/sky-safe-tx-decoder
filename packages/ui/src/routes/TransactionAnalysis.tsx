@@ -41,7 +41,7 @@ import { WeiValue } from '../components/WeiValue';
 import { HashHex } from '../components/HashHex';
 import { NestedSafeHashes } from '../components/NestedSafeHashes';
 import { TransactionLog } from '../components/TransactionLog';
-import { useAddressBook } from '../address-book/AddressBookContext';
+import { useAddressTagsVersion } from '../address-book/useAddressTagsVersion';
 import { useSafeRoute } from '../safe-route/SafeRouteProvider';
 import { useSettings } from '../settings/SettingsContext';
 
@@ -455,10 +455,11 @@ export default function TransactionAnalysis() {
   // no manual loadNetworkContracts call, no chainId derivation.
   const { network, safeAddress, chainId } = useSafeRoute();
   const address = safeAddress;
-  // Subscribe to the config — we don't render it directly here, but the
-  // security analysis (which reads address tags) must re-run whenever either
-  // file changes, so we depend on both slots below.
-  const { addressBook, mySafes } = useAddressBook();
+  // The security analysis reads the core address tag registry, which effects
+  // rewrite after this component renders (the address book rebuild, the
+  // network swap). tagsVersion changes after every rewrite, so the analysis
+  // below depends on it rather than on the slots that feed the registry.
+  const tagsVersion = useAddressTagsVersion();
   const { sourcifyFallback } = useSettings();
   const [searchParams] = useSearchParams();
   const safeTxHashParam = searchParams.get('safeTxHash');
@@ -714,7 +715,7 @@ export default function TransactionAnalysis() {
       }
     );
     setSecurity(analysis);
-  }, [transaction, paramAddresses, addressBook, mySafes, address]);
+  }, [transaction, paramAddresses, address, tagsVersion]);
 
   // Is this call decoded, and by what? Computed once, here, because BOTH the
   // Sourcify effect and the render below must agree on it.

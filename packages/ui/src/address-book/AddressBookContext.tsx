@@ -21,6 +21,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMatch } from 'react-router-dom';
 import {
+  batchAddressTagChanges,
   buildAddressBookTag,
   buildMergedTag,
   checkRemoteAddressBookUrl,
@@ -153,12 +154,16 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
 
   // Rebuild the shared address-book tag bucket from ALL sources whenever any
   // slot changes. Centralizing here lets the sources coexist instead of
-  // clobbering each other's tags.
+  // clobbering each other's tags. One batch, so subscribers (the address
+  // badge, the security analysis; see useAddressTagsVersion) are told once,
+  // after the whole rebuild, and never see the bucket half rebuilt.
   useEffect(() => {
-    clearAddressBookTags();
-    const byKey = new Map(merged.conflicts.map((c) => [lc(c.address), c]));
-    for (const e of merged.entries) registerAddressTag(e.address, buildMergedTag(e, byKey.get(lc(e.address))));
-    for (const s of mySafes?.safes ?? []) registerAddressTag(s.address, buildAddressBookTag(s));
+    batchAddressTagChanges(() => {
+      clearAddressBookTags();
+      const byKey = new Map(merged.conflicts.map((c) => [lc(c.address), c]));
+      for (const e of merged.entries) registerAddressTag(e.address, buildMergedTag(e, byKey.get(lc(e.address))));
+      for (const s of mySafes?.safes ?? []) registerAddressTag(s.address, buildAddressBookTag(s));
+    });
   }, [merged, mySafes]);
 
   /**

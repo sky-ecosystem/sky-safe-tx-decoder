@@ -18,6 +18,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { getAddressTags, toChecksumAddress, type AddressTag } from '@shield3/sky-safe-core';
 import { useAddressBook } from '../address-book/AddressBookContext';
+import { useAddressTagsVersion } from '../address-book/useAddressTagsVersion';
 import { useOptionalSafeRoute } from '../safe-route/SafeRouteProvider';
 
 interface AddressProps {
@@ -93,6 +94,9 @@ function CopyButton({ address }: { address: string }) {
 }
 
 export function Address({ address, safeAddress, className = '' }: AddressProps) {
+  // getAddressTags below reads the core registry, which effects rewrite after
+  // this renders. Subscribing re-renders the badge after every rewrite.
+  useAddressTagsVersion();
   // The unknown-address tint only makes sense when we have a managed list of
   // known addresses to compare against (the address book).
   // A configured remote book that failed to load still counts as "a book is
