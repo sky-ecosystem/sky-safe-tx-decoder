@@ -41,7 +41,7 @@
     "commander": "11.1.0",
     "inquirer": "12.11.1",
     "ora": "8.2.0",
-    "viem": "2.52.2"
+    "viem": "2.54.2"
   },
   "devDependencies": {
     "@types/inquirer": "9.0.9",
