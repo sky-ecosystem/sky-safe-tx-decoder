@@ -22,6 +22,13 @@ import {
 export type AddressTagSource = 'built-in' | 'address-book'
 export type AddressBookStatus = 'active' | 'inactive'
 
+/**
+ * Which address-book feed an entry came from. Both feeds keep
+ * source: 'address-book' — origin only records provenance for display, so
+ * every existing consumer (address-book-check, badges) is unaffected.
+ */
+export type AddressBookOrigin = 'csv' | 'remote'
+
 export interface AddressTag {
   label: string
   description: string
@@ -29,6 +36,19 @@ export interface AddressTag {
   source: AddressTagSource
   status?: AddressBookStatus
   verificationDate?: string
+  /** Which address-book feed produced this tag. Absent for built-ins. */
+  origin?: AddressBookOrigin
+  /**
+   * Set when the two address-book feeds disagree about this address. The
+   * winning feed supplies the tag; this records what the other feed said so
+   * the signer can be shown the disagreement instead of a single label they
+   * cannot check.
+   */
+  conflict?: {
+    otherLabel: string
+    otherStatus: AddressBookStatus
+    otherOrigin: AddressBookOrigin
+  }
 }
 
 /**
@@ -54,8 +74,78 @@ const CORE_BUILT_IN_TAGS = new Map<string, AddressTag>()
 const NETWORK_BUILT_IN_TAGS = new Map<string, AddressTag>()
 const ADDRESS_BOOK_TAGS = new Map<string, AddressTag>()
 
+/**
+ * Change tracking for the three buckets.
+ *
+ * A reader that renders from the registry (the UI address badge, the security
+ * analysis) must run again whenever the registry changes. Every mutation below
+ * increments `version`, so a reader can compare the version it last read with
+ * the current one, and `subscribeAddressTags` tells a listener that it changed.
+ *
+ * Inside batchAddressTagChanges the version still moves on every mutation, but
+ * listeners are told once, when the outermost batch ends. A full rebuild of
+ * the address book is then one notification, not one per entry.
+ */
+let version = 0
+let batchDepth = 0
+let changedInBatch = false
+const listeners = new Set<() => void>()
+
+function notify(): void {
+  for (const listener of [...listeners]) listener()
+}
+
+function changed(): void {
+  version++
+  if (batchDepth > 0) {
+    changedInBatch = true
+    return
+  }
+  notify()
+}
+
+/**
+ * Current registry version. It increases on every registration, removal and
+ * clear in any bucket, and never decreases. Two equal reads mean the registry
+ * did not change between them.
+ */
+export function getAddressTagsVersion(): number {
+  return version
+}
+
+/**
+ * Call `listener` after every change to the registry (once per batch inside
+ * {@link batchAddressTagChanges}). Returns the function that unsubscribes.
+ * The signature matches React's useSyncExternalStore.
+ */
+export function subscribeAddressTags(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/**
+ * Run `fn` and notify listeners once at the end, if it changed the registry.
+ * Batches nest; only the outermost one notifies. Listeners are notified even
+ * when `fn` throws, so a reader never keeps a view of a half-applied change.
+ */
+export function batchAddressTagChanges(fn: () => void): void {
+  batchDepth++
+  try {
+    fn()
+  } finally {
+    batchDepth--
+    if (batchDepth === 0 && changedInBatch) {
+      changedInBatch = false
+      notify()
+    }
+  }
+}
+
 function registerCoreBuiltIn(address: string, tag: Omit<AddressTag, 'source'>): void {
   CORE_BUILT_IN_TAGS.set(address.toLowerCase(), { ...tag, source: 'built-in' })
+  changed()
 }
 
 /**
@@ -64,6 +154,7 @@ function registerCoreBuiltIn(address: string, tag: Omit<AddressTag, 'source'>): 
  */
 export function _registerNetworkBuiltIn(address: string, tag: Omit<AddressTag, 'source'>): void {
   NETWORK_BUILT_IN_TAGS.set(address.toLowerCase(), { ...tag, source: 'built-in' })
+  changed()
 }
 
 /**
@@ -72,6 +163,7 @@ export function _registerNetworkBuiltIn(address: string, tag: Omit<AddressTag, '
  */
 export function _clearNetworkBuiltIns(): void {
   NETWORK_BUILT_IN_TAGS.clear()
+  changed()
 }
 
 // MultiSendCallOnly contracts
@@ -182,6 +274,7 @@ export function registerAddressTag(address: Address, tag: AddressTag): void {
   } else {
     CORE_BUILT_IN_TAGS.set(key, tag)
   }
+  changed()
 }
 
 /**
@@ -189,6 +282,7 @@ export function registerAddressTag(address: Address, tag: AddressTag): void {
  */
 export function unregisterAddressBookTag(address: Address): void {
   ADDRESS_BOOK_TAGS.delete(address.toLowerCase())
+  changed()
 }
 
 /**
@@ -196,6 +290,7 @@ export function unregisterAddressBookTag(address: Address): void {
  */
 export function clearAddressBookTags(): void {
   ADDRESS_BOOK_TAGS.clear()
+  changed()
 }
 
 export function getAllAddressTags(): Array<[Address, AddressTag]> {

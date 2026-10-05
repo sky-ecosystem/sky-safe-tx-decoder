@@ -16,6 +16,8 @@ interface AddressBookBrowserProps {
   /** Present when viewing My Safes. */
   safes?: AddressBookSafe[];
   skipped: AddressBookSkippedRow[];
+  /** Same-origin page where the book is managed. Rendered as a link when set. */
+  manageHref?: string | null;
   onClose: () => void;
 }
 
@@ -26,6 +28,7 @@ export function AddressBookBrowser({
   entries,
   safes,
   skipped,
+  manageHref,
   onClose,
 }: AddressBookBrowserProps) {
   useEffect(() => {
@@ -58,6 +61,14 @@ export function AddressBookBrowser({
               {filename} · loaded {loadedAt.toLocaleString()}
             </p>
           </div>
+          {manageHref && (
+            <a
+              href={manageHref}
+              className="ml-auto mr-4 text-sm text-blue-700 hover:underline whitespace-nowrap"
+            >
+              Open address book ↗
+            </a>
+          )}
           <button
             type="button"
             onClick={onClose}

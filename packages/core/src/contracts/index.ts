@@ -18,6 +18,7 @@
 import {
   _clearNetworkBuiltIns,
   _registerNetworkBuiltIn,
+  batchAddressTagChanges,
 } from '../utils/address-tags.js'
 import { CONTRACTS as ETHEREUM_CONTRACTS } from './ethereum.js'
 import { CONTRACTS as BASE_CONTRACTS } from './base.js'
@@ -44,16 +45,20 @@ export const CONTRACTS_BY_NETWORK: Record<string, NetworkContract[]> = {
  * Unknown networks are tolerated (clears + loads nothing).
  */
 export function loadNetworkContracts(network: string): void {
-  _clearNetworkBuiltIns()
-  const contracts = CONTRACTS_BY_NETWORK[network]
-  if (!contracts) return
-  for (const c of contracts) {
-    _registerNetworkBuiltIn(c.address, {
-      label: c.label,
-      description: c.description,
-      category: c.category,
-    })
-  }
+  // One notification for the whole swap, so a subscriber never renders the
+  // bucket half rebuilt.
+  batchAddressTagChanges(() => {
+    _clearNetworkBuiltIns()
+    const contracts = CONTRACTS_BY_NETWORK[network]
+    if (!contracts) return
+    for (const c of contracts) {
+      _registerNetworkBuiltIn(c.address, {
+        label: c.label,
+        description: c.description,
+        category: c.category,
+      })
+    }
+  })
 }
 
 /**

@@ -42,6 +42,7 @@ import { HashHex } from '../components/HashHex';
 import { NestedSafeHashes } from '../components/NestedSafeHashes';
 import { TransactionLog } from '../components/TransactionLog';
 import { useAddressBook } from '../address-book/AddressBookContext';
+import { useAddressTagsVersion } from '../address-book/useAddressTagsVersion';
 import { useSafeRoute } from '../safe-route/SafeRouteProvider';
 import { useSettings } from '../settings/SettingsContext';
 
@@ -455,10 +456,14 @@ export default function TransactionAnalysis() {
   // no manual loadNetworkContracts call, no chainId derivation.
   const { network, safeAddress, chainId } = useSafeRoute();
   const address = safeAddress;
-  // Subscribe to the config — we don't render it directly here, but the
-  // security analysis (which reads address tags) must re-run whenever either
-  // file changes, so we depend on both slots below.
-  const { addressBook, mySafes } = useAddressBook();
+  // The security analysis reads the core address tag registry, which effects
+  // rewrite after this component renders (the address book rebuild, the
+  // network swap). tagsVersion changes after every rewrite, so the analysis
+  // below depends on it rather than on the slots that feed the registry.
+  // remoteBookState tells the analysis when a configured remote book is still
+  // loading or failed, so it never reports an all-clear in either case.
+  const { remoteBookState } = useAddressBook();
+  const tagsVersion = useAddressTagsVersion();
   const { sourcifyFallback } = useSettings();
   const [searchParams] = useSearchParams();
   const safeTxHashParam = searchParams.get('safeTxHash');
@@ -711,10 +716,12 @@ export default function TransactionAnalysis() {
       {
         additionalAddresses: paramAddresses.map((address) => ({ address })),
         safeAddress: address as `0x${string}`,
+        remoteBook:
+          remoteBookState === 'loading' || remoteBookState === 'failed' ? remoteBookState : undefined,
       }
     );
     setSecurity(analysis);
-  }, [transaction, paramAddresses, addressBook, mySafes, address]);
+  }, [transaction, paramAddresses, address, tagsVersion, remoteBookState]);
 
   // Is this call decoded, and by what? Computed once, here, because BOTH the
   // Sourcify effect and the render below must agree on it.
@@ -1104,12 +1111,24 @@ export default function TransactionAnalysis() {
               </div>
             )}
 
-            {security.addressBook.warnings.length > 0 && (
+            {(security.addressBook.warnings.length > 0 || security.addressBook.remoteBook) && (
               <div className="bg-white rounded-lg p-4">
                 <p className="font-semibold mb-2">
                   {security.addressBook.warningLevel === 'high' ? '🔴' : '🟡'} Address Book
                 </p>
                 <ul className="text-sm space-y-1">
+                  {/* A configured remote book that is not loaded. Never silent:
+                      an empty section would read as every recipient checked. */}
+                  {security.addressBook.remoteBook === 'failed' && (
+                    <li>
+                      • The address book did not load. Recipients are not checked.
+                    </li>
+                  )}
+                  {security.addressBook.remoteBook === 'loading' && (
+                    <li>
+                      • The address book is loading. Recipients are not checked yet.
+                    </li>
+                  )}
                   {security.addressBook.warnings.map((r, i) => (
                     <li key={i}>
                       •{' '}

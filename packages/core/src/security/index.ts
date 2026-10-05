@@ -18,6 +18,7 @@ export type {
   AddressBookCheckResult,
   AddressBookRecipient,
   AddressBookRecipientStatus,
+  RemoteAddressBookState,
 } from './address-book-check.js';
 export { checkDelegateCall, isTrustedForDelegateCall, getOperationDescription, OperationType } from './delegate-call.js';
 export { checkGasTokenAttack } from './gas-token.js';

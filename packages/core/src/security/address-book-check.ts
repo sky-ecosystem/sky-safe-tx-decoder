@@ -16,7 +16,10 @@
  *   - present and active, OR matched by a built-in protocol tag -> "verified"
  *
  * Silent (no warnings, no risk) when no address book is loaded — otherwise
- * every transaction would flag every address as unknown.
+ * every transaction would flag every address as unknown. The exception is a
+ * remote book the caller reports as loading or failed (options.remoteBook):
+ * the result then carries that state at 'medium' or above, because a silent
+ * check would read as "every recipient checked".
  */
 
 import type { Address, Hex } from 'viem'
@@ -40,6 +43,13 @@ export interface AddressBookRecipient {
   source: 'to' | 'multisend' | 'param'
 }
 
+/**
+ * A remote address book the caller expects but does not hold:
+ *   - 'loading': it is requested and has not answered yet.
+ *   - 'failed':  the request, or the configuration that names it, failed.
+ */
+export type RemoteAddressBookState = 'loading' | 'failed'
+
 export interface AddressBookCheckResult {
   /** True when the signer has any address-book entries loaded. */
   addressBookLoaded: boolean
@@ -48,6 +58,12 @@ export interface AddressBookCheckResult {
   /** Addresses with status !== 'verified'. Empty when book not loaded. */
   warnings: AddressBookRecipient[]
   warningLevel?: WarningLevel
+  /**
+   * Set when the caller reported a remote address book that is loading or
+   * failed. Recipients are not checked against that book, so the check is
+   * never an all-clear while this is set: warningLevel is at least 'medium'.
+   */
+  remoteBook?: RemoteAddressBookState
 }
 
 export interface AdditionalAddress {
@@ -62,6 +78,12 @@ export interface CheckAddressBookOptions {
    * it never appears in warnings — even if it's not in the loaded book.
    */
   safeAddress?: Address
+  /**
+   * State of a remote address book that is configured but not loaded. Omit
+   * when no remote book is configured, or when it loaded: the check then
+   * behaves exactly as it does for a CSV book alone.
+   */
+  remoteBook?: RemoteAddressBookState
 }
 
 /**
@@ -79,8 +101,14 @@ export function checkAddressBook(
   additionalAddresses: AdditionalAddress[] = [],
   options: CheckAddressBookOptions = {}
 ): AddressBookCheckResult {
+  const remoteBook = options.remoteBook
   const addressBookLoaded = getAddressBookEntries().length > 0
   if (!addressBookLoaded) {
+    // No entries to check against. Silent, unless a remote book was expected:
+    // then the silence would read as "every recipient checked".
+    if (remoteBook) {
+      return { addressBookLoaded: false, recipients: [], warnings: [], warningLevel: 'medium', remoteBook }
+    }
     return { addressBookLoaded: false, recipients: [], warnings: [] }
   }
 
@@ -150,7 +178,7 @@ export function checkAddressBook(
   let warningLevel: WarningLevel | undefined
   if (warnings.some((r) => r.status === 'inactive')) {
     warningLevel = 'high'
-  } else if (warnings.length > 0) {
+  } else if (warnings.length > 0 || remoteBook) {
     warningLevel = 'medium'
   }
 
@@ -159,5 +187,6 @@ export function checkAddressBook(
     recipients,
     warnings,
     warningLevel,
+    ...(remoteBook ? { remoteBook } : {}),
   }
 }
