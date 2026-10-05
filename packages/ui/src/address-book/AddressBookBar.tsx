@@ -282,7 +282,7 @@ function RemoteBookErrorBanner() {
     <div className="bg-red-600 text-white">
       <div className="container mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <p className="font-bold text-sm">
-          {cause} Every address without a built-in, CSV or My Safes label is treated as unknown until it loads.
+          {cause} Address book labels are not shown.
         </p>
         <button
           type="button"

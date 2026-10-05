@@ -285,8 +285,7 @@ function AddressBookSection() {
         <>
           <p className="text-sm text-gray-600 mb-3">
             This deployment loads labels from the organisation&apos;s address book on this origin. When it cannot be
-            reached, every address without a built-in, CSV or My Safes label is shown as unknown and a red banner
-            says why.
+            reached, a red banner says why and its labels are not shown.
           </p>
           <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 rounded border border-gray-300 bg-white text-sm">
             <span className="text-gray-800">

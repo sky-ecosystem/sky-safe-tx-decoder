@@ -1121,14 +1121,12 @@ export default function TransactionAnalysis() {
                       an empty section would read as every recipient checked. */}
                   {security.addressBook.remoteBook === 'failed' && (
                     <li>
-                      • The address book did not load, so recipients are not checked against it. Retry from the red
-                      banner before you sign.
+                      • The address book did not load. Recipients are not checked.
                     </li>
                   )}
                   {security.addressBook.remoteBook === 'loading' && (
                     <li>
-                      • The address book is still loading, so recipients are not checked against it yet. Wait for it
-                      to load before you sign.
+                      • The address book is loading. Recipients are not checked yet.
                     </li>
                   )}
                   {security.addressBook.warnings.map((r, i) => (
