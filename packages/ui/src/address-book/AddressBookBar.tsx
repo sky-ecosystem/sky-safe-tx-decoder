@@ -281,7 +281,9 @@ function RemoteBookErrorBanner() {
   return (
     <div className="bg-red-600 text-white">
       <div className="container mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-        <p className="font-bold text-sm">{cause} Every address is treated as unknown until it loads.</p>
+        <p className="font-bold text-sm">
+          {cause} Every address without a built-in, CSV or My Safes label is treated as unknown until it loads.
+        </p>
         <button
           type="button"
           onClick={retryRemote}

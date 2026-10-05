@@ -168,9 +168,9 @@ with or drift stale, so each session you re-load fresh files.
 
 A deployment can serve labels from a service on the decoder's own origin. The
 build carries no configuration: on load the page reads `/sky-safe-config.json`
-from its origin, and a deployment without that file behaves exactly as above.
+from its origin, and a deployment that answers 404 for that file behaves exactly as above.
 Nothing from the service is persisted, and a failed fetch shows a red banner and
-leaves every address unknown. Contract: [`docs/address-book-api.md`](docs/address-book-api.md).
+leaves every address without a built-in, CSV or My Safes label unknown. Contract: [`docs/address-book-api.md`](docs/address-book-api.md).
 
 ### From Source
 

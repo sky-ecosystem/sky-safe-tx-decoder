@@ -47,5 +47,5 @@ Both responses need `Content-Type: application/json` and should carry `Cache-Con
 
 - The request is sent with same-origin credentials only, so an authenticating proxy in front of the origin works without any token in the tool.
 - Nothing is cached or written to browser storage. Each session fetches the book again.
-- Any failure clears every remote label, shows a red banner naming the cause, and treats every address as unknown until a manual retry.
+- Any failure clears every remote label, shows a red banner naming the cause, and treats every address without a built-in, CSV or My Safes label as unknown until a later fetch succeeds. Retry and a change of network fetch again.
 - A CSV address book loaded alongside is merged by address. The service wins; a differing label or status is shown as a conflict on the address.
