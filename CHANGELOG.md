@@ -24,6 +24,7 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- **Loading a CSV address book while a transaction was open left the Address Book warnings empty.** The analysis ran before the new labels were registered. The warnings, and every address badge, now update whenever an address label changes.
 - **A finding the daily checks could not file as an issue produced a passing run.** The PAU dispatch table check and the rate-limit key check read a failed issue search as "already reported", and issues are disabled on this repository, so a real finding notified nobody. Such a finding now fails one run and puts the issue title and body in the log, in an error annotation, and in the job summary; later runs show it as a warning until it changes or goes away. An unreachable RPC or Sourcify still exits 0 and reports nothing.
 
 ### Security
