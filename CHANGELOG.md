@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Security
+
+- **Dependencies upgraded to close open Dependabot advisories.** React Router is the only upgraded package in the web UI bundle. ws is a runtime dependency of the published core and CLI packages. The other packages are development and build tooling.
+  - `react-router-dom` 7.17.0 to 7.18.2, which brings `react-router` 7.18.2: GHSA-chx6-hx7r-mcp5, GHSA-qwww-vcr4-c8h2, GHSA-wrjc-x8rr-h8h6, GHSA-h8fp-f39c-q6mh, GHSA-337j-9hxr-rhxg.
+  - `vitest` 2.1.9 to 4.1.11, with `@vitest/mocker` 4.1.11: GHSA-5xrq-8626-4rwp, GHSA-82fw-gwwq-j7x9.
+  - Vitest now runs on the same Vite as the UI. This removes the Vite 5.4.21 that Vitest 2.1.9 installed: GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3, GHSA-4w7w-66w2-5vf9.
+  - `postcss` 8.5.15 to 8.5.23: GHSA-r28c-9q8g-f849, GHSA-fxqj-rqcc-2cmp.
+  - `js-yaml` 4.2.0 to 4.3.2: GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh.
+  - `brace-expansion` 1.1.15 to 1.1.21: GHSA-3jxr-9vmj-r5cp, GHSA-mh99-v99m-4gvg, GHSA-rgw5-rvv9-x895.
+  - `browserslist` 4.28.2 to 4.29.1, with `baseline-browser-mapping` 2.10.33 to 2.11.26: GHSA-73wf-gq98-2v4g, GHSA-c83g-rgw3-j3cx, GHSA-w5vr-8v7q-w6rv.
+  - `postcss-selector-parser` 6.1.2 to 6.1.4: GHSA-w9m9-85wc-3x92.
+  - `vite` 7.3.5 to 7.3.6. Vite 7.3.6 accepts esbuild `^0.27.0 || ^0.28.0`, so esbuild resolves to 0.28.2 for both Vite and `tsx` (from 0.27.7 and 0.28.0): GHSA-g7r4-m6w7-qqqr.
+  - `ws` 8.20.1 to 8.21.3 through a pnpm override: GHSA-96hv-2xvq-fx4p. The override applies to this repository only. An npm install of `@shield3/sky-safe-core` or `@shield3/sky-safe-cli` still receives ws 8.20.1, because viem 2.52.2 pins that version exactly.
+
 ## [0.4.2] — 2026-09-23
 
 The home page now lists the PAU decoder.
