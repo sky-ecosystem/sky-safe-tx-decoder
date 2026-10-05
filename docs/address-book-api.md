@@ -14,6 +14,8 @@ On load over `http` or `https` the decoder requests `GET /sky-safe-config.json` 
 
 Both URLs must be on the same origin as the page. A cross-origin `remoteAddressBookUrl` is refused before any request. A cross-origin `addressBookPageUrl` is dropped and no link is shown; it never affects the labels.
 
+A host that answers unknown paths with the app page (SPA fallback) must still answer 404 for `/sky-safe-config.json`, or the tool shows the error state.
+
 ## List endpoint
 
 `GET <remoteAddressBookUrl>?network=<ethereum|base|sepolia>`

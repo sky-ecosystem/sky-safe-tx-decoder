@@ -19,6 +19,7 @@ All notable changes to this project are documented here.
 - **Address badges render the address in EIP-55 checksum casing, with a copy control.** An address badge shows the label alone. It names its source only when two address books are loaded.
 - **Settings is reordered:** Address book, CSV address book, My Safes, Decoding. On a copy served with a remote address book, the URL override sits behind a disclosure.
 - **With a remote address book, the CSV address book slot is named for what it does:** add addresses from a CSV file.
+- **Cloudflare Pages answers 404 for an unknown path.** The hosted build adds a `404.html`, so Pages no longer serves the tool at every path. `/sky-safe-config.json` then answers 404, and the tool shows no red banner.
 
 ### Fixed
 
