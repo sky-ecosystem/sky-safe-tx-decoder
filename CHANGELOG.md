@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **A remote address book served next to the tool.** A deployment can serve address labels from a service on the tool's own origin. On load over `http` or `https`, the tool reads `/sky-safe-config.json` from its origin. A deployment that answers 404 for that file behaves as before, and a copy opened from a file never requests it. The build carries no configuration, so a hosted copy can be byte-identical to the release. Contract: `docs/address-book-api.md`.
+  - The tool refuses a cross-origin address book URL before any request. It sends same-origin credentials only, so an authenticating proxy in front of the origin works with no token in the tool.
+  - Nothing from the service is cached or written to browser storage. Each session fetches the book again.
+  - Any failure clears every remote label, shows a red banner naming the cause, and shows every address without another label as unknown until a later fetch succeeds.
+  - A row that fails validation is skipped and counted. The rest of the list loads. Inactive entries are listed and carry a warning.
+  - A CSV address book loaded alongside is merged by address. The service wins, and a differing label or status shows as a conflict on the address that names both sources. An inactive entry from the service shows the inactive warning instead.
+  - An optional `addressBookPageUrl` in the config shows an "Open address book" link in the address book view and on Settings. A cross-origin value is dropped and does not affect the labels.
+
+### Changed
+
+- **Address badges render the address in EIP-55 checksum casing, with a copy control.** An address badge shows the label alone. It names its source only when two address books are loaded.
+- **Settings is reordered:** Address book, CSV address book, My Safes, Decoding. On a copy served with a remote address book, the URL override sits behind a disclosure.
+- **With a remote address book, the CSV address book slot is named for what it does:** add addresses from a CSV file.
+
 ### Fixed
 
 - **A finding the daily checks could not file as an issue produced a passing run.** The PAU dispatch table check and the rate-limit key check read a failed issue search as "already reported", and issues are disabled on this repository, so a real finding notified nobody. Such a finding now fails one run and puts the issue title and body in the log, in an error annotation, and in the job summary; later runs show it as a warning until it changes or goes away. An unreachable RPC or Sourcify still exits 0 and reports nothing.
