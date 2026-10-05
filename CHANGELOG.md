@@ -2,7 +2,9 @@
 
 All notable changes to this project are documented here.
 
-## [Unreleased]
+## [0.5.0] — 2026-10-05
+
+A remote address book served from the tool's own origin, address book warnings that update whenever a label changes, and dependency upgrades that close the open Dependabot advisories.
 
 ### Added
 
