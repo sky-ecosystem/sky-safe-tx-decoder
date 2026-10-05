@@ -32,9 +32,15 @@
  *   node scripts/generate-pau-dispatch.mjs             # write the table file
  *   node scripts/generate-pau-dispatch.mjs --check     # diff live vs committed
  *   node scripts/generate-pau-dispatch.mjs --check --issues  # ...and open an issue
+ *   node scripts/generate-pau-dispatch.mjs --check --issues --state <file>
  *
  * Requires ETH_RPC_URL. `--issues` additionally requires the `gh` CLI to be
  * authenticated.
+ *
+ * A transport problem exits 0 and reports nothing. A difference that `--issues`
+ * cannot file exits 1 and prints the issue to the log and the job summary
+ * instead, so the failed run is the alert. With `--state`, a difference fails
+ * one run only: later runs report it as a warning until it changes or goes away.
  */
 
 import fs from 'node:fs'
@@ -119,6 +125,8 @@ const INTEGRATIONS_SELECTOR = toFunctionSelector('function integrations()')
 const RPC = process.env.ETH_RPC_URL
 const CHECK = process.argv.includes('--check')
 const OPEN_ISSUES = process.argv.includes('--issues')
+const STATE_ARG = process.argv.indexOf('--state')
+const STATE_FILE = STATE_ARG === -1 ? null : process.argv[STATE_ARG + 1]
 
 /**
  * A transport problem is not a finding.
@@ -130,6 +138,39 @@ const OPEN_ISSUES = process.argv.includes('--issues')
 function bail(message) {
   console.log(`Skipping: ${message}`)
   process.exit(0)
+}
+
+/**
+ * Differences that already failed a run without an issue, as
+ * `{ dedupeKey: "YYYY-MM-DD first alerted" }`.
+ *
+ * Only the workflow passes `--state`, and carries the file between runs in the
+ * Actions cache. A missing or unreadable file reads as empty, which errs toward
+ * failing a run again rather than staying quiet.
+ */
+function readState() {
+  if (!STATE_FILE) return {}
+  try {
+    const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))
+    return state && typeof state === 'object' && !Array.isArray(state) ? state : {}
+  } catch {
+    return {}
+  }
+}
+
+const STATE = readState()
+
+/**
+ * Write the state back holding only `keys`, the differences found in this run.
+ *
+ * A difference that goes away is dropped, so if it comes back it fails a run
+ * again. Never called on a transport problem: `bail` exits first.
+ */
+function saveState(keys) {
+  if (!STATE_FILE) return
+  const kept = {}
+  for (const key of keys) if (STATE[key]) kept[key] = STATE[key]
+  fs.writeFileSync(STATE_FILE, `${JSON.stringify(kept, null, 2)}\n`)
 }
 
 async function rpc(method, params) {
@@ -443,6 +484,7 @@ console.log(`\n${added.length} added, ${changed.length} changed, ${removed.lengt
 
 if (added.length === 0 && remaps === 0) {
   console.log('The frozen table matches the chain. Nothing to do.')
+  saveState([])
   process.exit(0)
 }
 
@@ -473,26 +515,53 @@ if (!OPEN_ISSUES) process.exit(0)
  * Keyed on the block the difference was observed against would open a new issue
  * every day, so the key is the set of affected selectors instead. Closed counts:
  * an issue closed as handled should not be reopened on the next run.
+ *
+ * Throws when the search fails. That is not "reported": see `unfiled`.
  */
 function alreadyReported(key) {
-  try {
-    const out = execFileSync(
-      'gh',
-      ['issue', 'list', '--state', 'all', '--search', key, '--json', 'number', '--limit', '1'],
-      { encoding: 'utf8' }
+  const out = execFileSync(
+    'gh',
+    ['issue', 'list', '--state', 'all', '--search', key, '--json', 'number', '--limit', '1'],
+    { encoding: 'utf8' }
+  )
+  return JSON.parse(out).length > 0
+}
+
+/**
+ * A difference that cannot be filed is a failure.
+ *
+ * Unlike a transport problem, this is a finding. Reading a failed search as
+ * "already reported" turns it into a green run that tells nobody. Creating the
+ * issue without the search could duplicate an existing one. So the run fails,
+ * and carries the issue text where a person opening it will see it.
+ *
+ * A difference already in the state failed an earlier run, so it is reported
+ * as a warning and does not fail this one. A red run every day for one unfixed
+ * difference is how a check gets muted.
+ */
+function unfiled(key, title, body, error) {
+  const stderr = error.stderr?.toString().trim()
+  const reason = stderr ? stderr.split(/\s*\n\s*/).join(' ') : error.message.split('\n')[0]
+  const since = STATE[key]
+  const note = since ? `. It already failed a run on ${since}, so this run does not fail for it` : ''
+  console.log(`\nCould not file this issue: ${reason}${note}\n\n${title}\n\n${body}\n`)
+  const annotation = `${title}. The issue could not be filed: ${reason}${note}`
+  const level = since ? 'warning' : 'error'
+  console.log(`::${level}::${annotation.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')}`)
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    fs.appendFileSync(
+      process.env.GITHUB_STEP_SUMMARY,
+      `# ${title}\n\nThis issue could not be filed: ${reason}${note}\n\n${body}\n\n`
     )
-    return JSON.parse(out).length > 0
-  } catch (error) {
-    // Failing closed here would spam. Treat a search failure as "reported" so
-    // the run is a no-op rather than a duplicate.
-    console.log(`  could not search issues (${error.message}); skipping to avoid duplicates`)
-    return true
   }
+  if (since) return
+  STATE[key] = readDate
+  process.exitCode = 1
 }
 
 const title =
   remaps > 0
-    ? `PAU REMAP DETECTED — ${remaps} frozen dispatch entr${remaps === 1 ? 'y' : 'ies'} no longer match the chain`
+    ? `PAU REMAP DETECTED: ${remaps} frozen dispatch ${remaps === 1 ? 'entry no longer matches' : 'entries no longer match'} the chain`
     : `PAU dispatch table is missing ${added.length} call selector${added.length === 1 ? '' : 's'}`
 
 // Deduped on the affected selectors, which are stable across runs while the
@@ -504,16 +573,11 @@ const dedupeKey = [...changed, ...removed]
   .sort()
   .join(' ')
 
-if (alreadyReported(dedupeKey)) {
-  console.log('An issue already covers these selectors.')
-  process.exit(0)
-}
-
 const body = []
 
 if (remaps > 0) {
   body.push(
-    '## REMAP DETECTED — update immediately',
+    '## REMAP DETECTED: update immediately',
     '',
     'A call selector the frozen table already covers now resolves to something else on',
     'chain, or has been removed. Until the table is regenerated the decoder labels these',
@@ -523,7 +587,7 @@ if (remaps > 0) {
   )
   for (const entry of changed) {
     body.push(
-      `### Changed — call selector \`${entry.after.callSelector}\``,
+      `### Changed: call selector \`${entry.after.callSelector}\``,
       '',
       `Controller \`${entry.controller}\``,
       '',
@@ -538,7 +602,7 @@ if (remaps > 0) {
   }
   for (const entry of removed) {
     body.push(
-      `### Removed — call selector \`${entry.before.callSelector}\``,
+      `### Removed: call selector \`${entry.before.callSelector}\``,
       '',
       `Controller \`${entry.controller}\``,
       '',
@@ -555,7 +619,7 @@ if (remaps > 0) {
 
 if (added.length > 0) {
   body.push(
-    '## Additive — regenerate the table to gain coverage',
+    '## Additive: regenerate the table to gain coverage',
     '',
     'These call selectors are wired on chain and absent from the frozen table. The decoder',
     'reports them as unknown and marks the call high risk, which is correct but is missing',
@@ -588,6 +652,18 @@ body.push(
   'See `packages/core/src/decoders/PAU.md`.'
 )
 
-execFileSync('gh', ['issue', 'create', '--title', title, '--body', body.join('\n')], {
-  stdio: 'inherit',
-})
+// The body is built before the search so a failure at either step can report it.
+try {
+  if (alreadyReported(dedupeKey)) {
+    console.log('An issue already covers these selectors.')
+  } else {
+    const url = execFileSync('gh', ['issue', 'create', '--title', title, '--body', body.join('\n')], {
+      encoding: 'utf8',
+    })
+    console.log(url.trim())
+  }
+} catch (error) {
+  unfiled(dedupeKey, title, body.join('\n'), error)
+}
+
+saveState([dedupeKey])

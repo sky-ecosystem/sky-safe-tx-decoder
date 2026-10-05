@@ -26,11 +26,18 @@
  * Usage:
  *   node scripts/check-rate-limit-keys.mjs            # print findings
  *   node scripts/check-rate-limit-keys.mjs --issues   # also open GitHub issues
+ *   node scripts/check-rate-limit-keys.mjs --issues --state <file>
  *
  * Requires ETH_RPC_URL. `--issues` additionally requires the `gh` CLI to be
  * authenticated.
+ *
+ * A transport problem exits 0 and reports nothing. An unresolved key that
+ * `--issues` cannot file exits 1 and prints the issue to the log and the job
+ * summary instead, so the failed run is the alert. With `--state`, a key fails
+ * one run only: later runs report it as a warning until it resolves.
  */
 
+import fs from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { resolveRateLimitKey, CONTRACTS_BY_NETWORK } from '../packages/core/dist/index.js'
 
@@ -55,6 +62,9 @@ const RATE_LIMIT_DATA_SET =
 
 const RPC = process.env.ETH_RPC_URL
 const OPEN_ISSUES = process.argv.includes('--issues')
+const STATE_ARG = process.argv.indexOf('--state')
+const STATE_FILE = STATE_ARG === -1 ? null : process.argv[STATE_ARG + 1]
+const TODAY = new Date().toISOString().slice(0, 10)
 
 /**
  * A transport problem is not a finding.
@@ -66,6 +76,39 @@ const OPEN_ISSUES = process.argv.includes('--issues')
 function bail(message) {
   console.log(`Skipping: ${message}`)
   process.exit(0)
+}
+
+/**
+ * Findings that already failed a run without an issue, as
+ * `{ dedupeKey: "YYYY-MM-DD first alerted" }`.
+ *
+ * Only the workflow passes `--state`, and carries the file between runs in the
+ * Actions cache. A missing or unreadable file reads as empty, which errs toward
+ * failing a run again rather than staying quiet.
+ */
+function readState() {
+  if (!STATE_FILE) return {}
+  try {
+    const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))
+    return state && typeof state === 'object' && !Array.isArray(state) ? state : {}
+  } catch {
+    return {}
+  }
+}
+
+const STATE = readState()
+
+/**
+ * Write the state back holding only `keys`, the findings of this run.
+ *
+ * A finding that goes away is dropped, so if it comes back it fails a run
+ * again. Never called on a transport problem: `bail` exits first.
+ */
+function saveState(keys) {
+  if (!STATE_FILE) return
+  const kept = {}
+  for (const key of keys) if (STATE[key]) kept[key] = STATE[key]
+  fs.writeFileSync(STATE_FILE, `${JSON.stringify(kept, null, 2)}\n`)
 }
 
 async function rpc(method, params) {
@@ -102,20 +145,64 @@ function amountsFrom(log) {
  *
  * Closed counts: an issue closed as handled or as won't-fix should not be
  * reopened as a new one on the next run.
+ *
+ * Throws when the search fails. That is not "reported": see `unfiled`.
  */
 function alreadyReported(key) {
-  try {
-    const out = execFileSync(
-      'gh',
-      ['issue', 'list', '--state', 'all', '--search', key, '--json', 'number', '--limit', '1'],
-      { encoding: 'utf8' }
+  const out = execFileSync(
+    'gh',
+    ['issue', 'list', '--state', 'all', '--search', key, '--json', 'number', '--limit', '1'],
+    { encoding: 'utf8' }
+  )
+  return JSON.parse(out).length > 0
+}
+
+/**
+ * An unresolved key that cannot be filed is a failure.
+ *
+ * Unlike a transport problem, this is a finding. Reading a failed search as
+ * "already reported" turns it into a green run that tells nobody. Creating the
+ * issue without the search could duplicate an existing one. So the run fails,
+ * and carries the issue text where a person opening it will see it. Sets the
+ * exit code rather than exiting, so every finding is reported.
+ *
+ * A key already in the state failed an earlier run, so it is reported as a
+ * warning and does not fail this one. A red run every day for one unfixed key
+ * is how a check gets muted.
+ */
+function unfiled(key, title, body, error) {
+  const stderr = error.stderr?.toString().trim()
+  const reason = stderr ? stderr.split(/\s*\n\s*/).join(' ') : error.message.split('\n')[0]
+  const since = STATE[key]
+  const note = since ? `. It already failed a run on ${since}, so this run does not fail for it` : ''
+  console.log(`\nCould not file this issue: ${reason}${note}\n\n${title}\n\n${body}\n`)
+  const annotation = `${title}. The issue could not be filed: ${reason}${note}`
+  const level = since ? 'warning' : 'error'
+  console.log(`::${level}::${annotation.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A')}`)
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    fs.appendFileSync(
+      process.env.GITHUB_STEP_SUMMARY,
+      `# ${title}\n\nThis issue could not be filed: ${reason}${note}\n\n${body}\n\n`
     )
-    return JSON.parse(out).length > 0
+  }
+  if (since) return
+  STATE[key] = TODAY
+  process.exitCode = 1
+}
+
+/** Open an issue unless one already mentions `key`. */
+function fileIssue(key, title, body) {
+  try {
+    if (alreadyReported(key)) {
+      console.log(`  ${key} already reported`)
+      return
+    }
+    const url = execFileSync('gh', ['issue', 'create', '--title', title, '--body', body], {
+      encoding: 'utf8',
+    })
+    console.log(url.trim())
   } catch (error) {
-    // Failing closed here would spam. Treat a search failure as "reported" so
-    // the run is a no-op rather than a duplicate.
-    console.log(`  could not search issues (${error.message}); skipping to avoid duplicates`)
-    return true
+    unfiled(key, title, body, error)
   }
 }
 
@@ -143,7 +230,7 @@ function openIssue(finding) {
     `set the key is usually the fastest way to find the operands.`,
   ].join('\n')
 
-  execFileSync('gh', ['issue', 'create', '--title', title, '--body', body], { stdio: 'inherit' })
+  fileIssue(finding.key, title, body)
 }
 
 if (!RPC) bail('ETH_RPC_URL is not set')
@@ -188,6 +275,7 @@ for (const target of WATCH) {
 
 if (findings.length === 0) {
   console.log('All keys resolve. Nothing to do.')
+  saveState([])
   process.exit(0)
 }
 
@@ -214,44 +302,27 @@ if (findings.length > MAX_INDIVIDUAL_ISSUES) {
   // stays open until someone works it; new keys on the same contract fold into
   // it rather than opening more.
   const target = findings[0].rateLimits
-  if (alreadyReported(target)) {
-    console.log(`Summary issue for ${target} already exists.`)
-    process.exit(0)
-  }
-
   const rows = findings
     .map(f => `| \`${f.key}\` | \`${f.maxAmount}\` | ${f.block} |`)
     .join('\n')
 
-  execFileSync(
-    'gh',
+  fileIssue(
+    target,
+    `${findings.length} unresolved rate-limit keys on ${target}`,
     [
-      'issue',
-      'create',
-      '--title',
-      `${findings.length} unresolved rate-limit keys on ${target}`,
-      '--body',
-      [
-        `${findings.length} keys set on \`${target}\` cannot be resolved by this build.`,
-        `Reported as one issue rather than ${findings.length} separate ones.`,
-        '',
-        `| Key | maxAmount | Block |`,
-        `| --- | --- | --- |`,
-        rows,
-        '',
-        `See \`packages/core/src/decoders/PAS.md\` for how to add a key name or an operand`,
-        `address.`,
-      ].join('\n'),
-    ],
-    { stdio: 'inherit' }
+      `${findings.length} keys set on \`${target}\` cannot be resolved by this build.`,
+      `Reported as one issue rather than ${findings.length} separate ones.`,
+      '',
+      `| Key | maxAmount | Block |`,
+      `| --- | --- | --- |`,
+      rows,
+      '',
+      `See \`packages/core/src/decoders/PAS.md\` for how to add a key name or an operand`,
+      `address.`,
+    ].join('\n')
   )
-  process.exit(0)
-}
-
-for (const finding of findings) {
-  if (alreadyReported(finding.key)) {
-    console.log(`  ${finding.key} already reported`)
-    continue
-  }
-  openIssue(finding)
+  saveState([target])
+} else {
+  for (const finding of findings) openIssue(finding)
+  saveState(findings.map(f => f.key))
 }

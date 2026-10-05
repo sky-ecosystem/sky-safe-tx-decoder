@@ -41,13 +41,13 @@
     "commander": "11.1.0",
     "inquirer": "12.11.1",
     "ora": "8.2.0",
-    "viem": "2.52.2"
+    "viem": "2.54.2"
   },
   "devDependencies": {
     "@types/inquirer": "9.0.9",
     "@types/node": "20.19.41",
     "tsx": "4.22.4",
     "typescript": "5.9.3",
-    "vitest": "2.1.9"
+    "vitest": "4.1.11"
   }
 }
