@@ -41,6 +41,7 @@ import { WeiValue } from '../components/WeiValue';
 import { HashHex } from '../components/HashHex';
 import { NestedSafeHashes } from '../components/NestedSafeHashes';
 import { TransactionLog } from '../components/TransactionLog';
+import { useAddressBook } from '../address-book/AddressBookContext';
 import { useAddressTagsVersion } from '../address-book/useAddressTagsVersion';
 import { useSafeRoute } from '../safe-route/SafeRouteProvider';
 import { useSettings } from '../settings/SettingsContext';
@@ -459,6 +460,9 @@ export default function TransactionAnalysis() {
   // rewrite after this component renders (the address book rebuild, the
   // network swap). tagsVersion changes after every rewrite, so the analysis
   // below depends on it rather than on the slots that feed the registry.
+  // remoteBookState tells the analysis when a configured remote book is still
+  // loading or failed, so it never reports an all-clear in either case.
+  const { remoteBookState } = useAddressBook();
   const tagsVersion = useAddressTagsVersion();
   const { sourcifyFallback } = useSettings();
   const [searchParams] = useSearchParams();
@@ -712,10 +716,12 @@ export default function TransactionAnalysis() {
       {
         additionalAddresses: paramAddresses.map((address) => ({ address })),
         safeAddress: address as `0x${string}`,
+        remoteBook:
+          remoteBookState === 'loading' || remoteBookState === 'failed' ? remoteBookState : undefined,
       }
     );
     setSecurity(analysis);
-  }, [transaction, paramAddresses, address, tagsVersion]);
+  }, [transaction, paramAddresses, address, tagsVersion, remoteBookState]);
 
   // Is this call decoded, and by what? Computed once, here, because BOTH the
   // Sourcify effect and the render below must agree on it.
@@ -1105,12 +1111,26 @@ export default function TransactionAnalysis() {
               </div>
             )}
 
-            {security.addressBook.warnings.length > 0 && (
+            {(security.addressBook.warnings.length > 0 || security.addressBook.remoteBook) && (
               <div className="bg-white rounded-lg p-4">
                 <p className="font-semibold mb-2">
                   {security.addressBook.warningLevel === 'high' ? '🔴' : '🟡'} Address Book
                 </p>
                 <ul className="text-sm space-y-1">
+                  {/* A configured remote book that is not loaded. Never silent:
+                      an empty section would read as every recipient checked. */}
+                  {security.addressBook.remoteBook === 'failed' && (
+                    <li>
+                      • The address book did not load, so recipients are not checked against it. Retry from the red
+                      banner before you sign.
+                    </li>
+                  )}
+                  {security.addressBook.remoteBook === 'loading' && (
+                    <li>
+                      • The address book is still loading, so recipients are not checked against it yet. Wait for it
+                      to load before you sign.
+                    </li>
+                  )}
                   {security.addressBook.warnings.map((r, i) => (
                     <li key={i}>
                       •{' '}

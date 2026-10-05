@@ -2,7 +2,7 @@
  * Security Analyzer - Combines all security checks
  */
 
-import { checkAddressBook, type AdditionalAddress } from './address-book-check.js';
+import { checkAddressBook, type AdditionalAddress, type RemoteAddressBookState } from './address-book-check.js';
 import { checkDelegateCall } from './delegate-call.js';
 import { checkGasTokenAttack } from './gas-token.js';
 import { checkOwnerModifications } from './owner-checks.js';
@@ -52,6 +52,12 @@ export function analyzeSecurity(
      * in unknown-recipient warnings even if absent from the loaded book.
      */
     safeAddress?: Address
+    /**
+     * A remote address book that is configured but not loaded ('loading' or
+     * 'failed'). Passed to the address-book check, which then never reports
+     * an all-clear. Omit when none is configured or it loaded.
+     */
+    remoteBook?: RemoteAddressBookState
   } = {}
 ): SecurityAnalysisResult {
   // Check for untrusted delegate calls
@@ -75,7 +81,7 @@ export function analyzeSecurity(
     txData.to as Address,
     txData.data as Hex,
     options.additionalAddresses,
-    { safeAddress: options.safeAddress }
+    { safeAddress: options.safeAddress, remoteBook: options.remoteBook }
   );
 
   // Determine overall risk level (highest of all checks)
@@ -122,7 +128,8 @@ export function analyzeSecurity(
     ownerModification.modifiesOwners ||
     moduleGuard.hasModuleOperation ||
     moduleGuard.hasGuardOperation ||
-    addressBook.warnings.length > 0;
+    addressBook.warnings.length > 0 ||
+    addressBook.remoteBook !== undefined;
 
   return {
     delegateCall,

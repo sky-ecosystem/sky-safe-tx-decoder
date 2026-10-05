@@ -96,11 +96,25 @@ const IDLE_REMOTE: RemoteBookSlot = {
  */
 export type DeploymentConfigStatus = 'skipped' | 'probing' | 'configured' | 'not-configured' | 'error';
 
+/**
+ * The remote address book as the security analysis needs it:
+ *
+ *   - none:    no remote book is configured. CSV-only behaviour.
+ *   - loading: the probe is in flight, or a URL is in effect and the book has
+ *              not answered yet. Recipients are not checked against it yet.
+ *   - ok:      the book loaded; its entries are in the tag registry.
+ *   - failed:  the probe or the fetch failed. Recipients are not checked
+ *              against it.
+ */
+export type RemoteBookState = 'none' | 'loading' | 'ok' | 'failed';
+
 interface AddressBookContextValue {
   /** Managed address book (labels). Read-only. */
   addressBook: AddressBookSlot | null;
   /** Remote address book fetched from the service. */
   remoteBook: RemoteBookSlot;
+  /** Derived state of the remote book, for the security analysis. */
+  remoteBookState: RemoteBookState;
   /** URL this deployment configured, or null when it configured none. */
   deploymentUrl: string | null;
   /** Same-origin page where a person opens the address book, or null. */
@@ -136,6 +150,12 @@ function lc(address: string): string {
   return address.toLowerCase();
 }
 
+/** The manual override when the signer set one, else the deployment's URL. */
+function effectiveRemoteUrl(override: string, deploymentUrl: string | null): string {
+  const trimmed = override.trim();
+  return trimmed !== '' ? trimmed : (deploymentUrl ?? '');
+}
+
 export function AddressBookProvider({ children }: { children: ReactNode }) {
   const [addressBook, setAddressBook] = useState<AddressBookSlot | null>(null);
   const [mySafes, setMySafes] = useState<MySafesSlot | null>(null);
@@ -143,6 +163,19 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
   const [deploymentUrl, setDeploymentUrl] = useState<string | null>(null);
   const [addressBookPageUrl, setAddressBookPageUrl] = useState<string | null>(null);
   const [configStatus, setConfigStatus] = useState<DeploymentConfigStatus>('probing');
+  const { remoteAddressBookUrl } = useSettings();
+  const effectiveUrl = effectiveRemoteUrl(remoteAddressBookUrl, deploymentUrl);
+
+  // An idle slot with a URL in effect is about to be fetched by
+  // RemoteAddressBookLoader, so it counts as loading, as does the probe.
+  const remoteBookState: RemoteBookState =
+    remoteBook.status === 'error'
+      ? 'failed'
+      : remoteBook.status === 'ok'
+        ? 'ok'
+        : remoteBook.status === 'loading' || configStatus === 'probing' || effectiveUrl !== ''
+          ? 'loading'
+          : 'none';
 
   // The CSV book and the remote book are one list: merged so a disagreement
   // between them becomes a conflict on the tag rather than one silently chosen
@@ -268,6 +301,9 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
       return;
     }
     setConfigStatus('probing');
+    // A retried probe starts clean. Without this, a probe failure followed by
+    // a 404 keeps the old error, and its banner, for the rest of the session.
+    setRemoteBook((prev) => (prev.status === 'error' && prev.url === '' ? IDLE_REMOTE : prev));
     try {
       let response: Response;
       try {
@@ -407,6 +443,7 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
       addressBook,
       mySafes,
       remoteBook: { ...remoteBook, conflicts: merged.conflicts },
+      remoteBookState,
       deploymentUrl,
       addressBookPageUrl,
       configStatus,
@@ -426,6 +463,7 @@ export function AddressBookProvider({ children }: { children: ReactNode }) {
       addressBook,
       mySafes,
       remoteBook,
+      remoteBookState,
       deploymentUrl,
       addressBookPageUrl,
       configStatus,
@@ -462,8 +500,7 @@ export function RemoteAddressBookLoader() {
   const { remoteAddressBookUrl } = useSettings();
   const match = useMatch('/safe/:network/*');
   const network = match?.params.network ?? null;
-  const override = remoteAddressBookUrl.trim();
-  const effectiveUrl = override !== '' ? override : (deploymentUrl ?? '');
+  const effectiveUrl = effectiveRemoteUrl(remoteAddressBookUrl, deploymentUrl);
 
   useEffect(() => {
     if (effectiveUrl === '') return;
