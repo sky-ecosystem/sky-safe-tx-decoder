@@ -5,8 +5,9 @@
  * @see https://docs.safe.global/core-api/transaction-service-reference
  */
 
-import type { Address } from 'viem'
+import type { Address, Hex } from 'viem'
 import type {
+  SafeApiDataDecoded,
   SafeApiMultisigTransactionResponse,
   SafeApiMultisigTransaction,
   SafeApiSafeInfo,
@@ -321,6 +322,147 @@ export class SafeApiClient {
         )
       }
     }, 3, 1000, this.onRetry)
+  }
+
+  /**
+   * Decode calldata with the service's data decoder:
+   * `POST /api/v1/data-decoder/` with `{ "data": ..., "to": ... }`.
+   *
+   * The answer has the shape of a transaction record's `dataDecoded`,
+   * including `valueDecoded` for a MultiSend. Checked against the live
+   * service: for an existing transaction it returns that record's
+   * `dataDecoded` exactly. For a selector it does not know, the service
+   * answers 200 with its `fallback` sentinel. That is returned unchanged, so
+   * callers handle it with `isApiFallbackSentinel` as they do for a record.
+   *
+   * Returns null when there is no decoding to use: empty calldata (the
+   * service rejects `0x` with 422), any other non-2xx answer, a network
+   * failure, rate limiting that outlasts the retries, or a body without a
+   * method name and parameter list.
+   *
+   * @param data - Calldata to decode
+   * @param to - Call target. The service uses it to pick a contract's ABI.
+   */
+  async decodeData(data: Hex, to?: Address): Promise<SafeApiDataDecoded | null> {
+    if (!data || data === '0x') return null
+
+    const endpoint = `${this.baseUrl}/api/v1/data-decoder/`
+    try {
+      return await retryWithBackoff(async () => {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(to ? { data, to } : { data }),
+        })
+
+        if (response.status === 429) {
+          throw new SafeApiError('Safe API rate limit', 429)
+        }
+        if (!response.ok) return null
+
+        const body = (await response.json()) as unknown
+        if (!body || typeof body !== 'object') return null
+        const decoded = body as Partial<SafeApiDataDecoded>
+        if (typeof decoded.method !== 'string' || !Array.isArray(decoded.parameters)) {
+          return null
+        }
+        return decoded as SafeApiDataDecoded
+      }, 3, 1000, this.onRetry)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Look up a multisig transaction by its safeTxHash:
+   * `GET /api/v2/multisig-transactions/{safeTxHash}/`.
+   *
+   * @returns The transaction, or null when the service has no transaction with
+   *   this hash (404)
+   * @throws {SafeApiError} on any other failure, including after retries
+   */
+  async fetchTransactionByHash(safeTxHash: Hex): Promise<SafeApiMultisigTransaction | null> {
+    return retryWithBackoff(async () => {
+      const endpoint = `${this.baseUrl}/api/v2/multisig-transactions/${safeTxHash}/`
+
+      try {
+        const response = await fetch(endpoint)
+
+        if (response.status === 404) return null
+        if (!response.ok) {
+          throw new SafeApiError(
+            `Safe API request failed: ${response.statusText}`,
+            response.status
+          )
+        }
+
+        return (await response.json()) as SafeApiMultisigTransaction
+      } catch (error) {
+        if (error instanceof SafeApiError) {
+          throw error
+        }
+
+        throw new SafeApiError(
+          `Failed to fetch transaction: ${error instanceof Error ? error.message : String(error)}`,
+          undefined,
+          error
+        )
+      }
+    }, 3, 1000, this.onRetry)
+  }
+
+  /**
+   * Fetch the Safe's queue: transactions not executed, at or above
+   * `fromNonce` (the on-chain nonce), highest nonce first.
+   *
+   * The same filter is applied to the answer, so a service that ignores a
+   * query parameter cannot put an executed or replaced transaction in the
+   * queue. Reads up to five pages of 100.
+   *
+   * @throws {SafeApiError} if a request fails (including after retries)
+   */
+  async fetchQueuedTransactions(
+    safeAddress: Address,
+    fromNonce: number
+  ): Promise<SafeApiMultisigTransaction[]> {
+    const PAGE = 100
+    const MAX_PAGES = 5
+    const queued: SafeApiMultisigTransaction[] = []
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const endpoint =
+        `${this.baseUrl}/api/v1/safes/${safeAddress}/multisig-transactions/` +
+        `?executed=false&nonce__gte=${fromNonce}&ordering=-nonce&limit=${PAGE}&offset=${page * PAGE}`
+
+      const data = await retryWithBackoff(async () => {
+        try {
+          const response = await fetch(endpoint)
+          if (!response.ok) {
+            throw new SafeApiError(
+              `Failed to fetch queued transactions: ${response.statusText}`,
+              response.status
+            )
+          }
+          return (await response.json()) as SafeApiMultisigTransactionResponse
+        } catch (error) {
+          if (error instanceof SafeApiError) {
+            throw error
+          }
+          throw new SafeApiError(
+            `Failed to fetch queued transactions: ${error instanceof Error ? error.message : String(error)}`,
+            undefined,
+            error
+          )
+        }
+      }, 3, 1000, this.onRetry)
+
+      for (const tx of data.results) {
+        if (!tx.isExecuted && Number(tx.nonce) >= fromNonce) queued.push(tx)
+      }
+      if (data.results.length < PAGE || !data.next) break
+    }
+
+    return queued
   }
 
   /**
