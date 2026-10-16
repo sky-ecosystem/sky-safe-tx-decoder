@@ -2,6 +2,7 @@ import { HashRouter, Routes, Route, Link } from 'react-router-dom';
 import Home from './routes/Home';
 import SafeTransactions from './routes/SafeTransactions';
 import TransactionAnalysis from './routes/TransactionAnalysis';
+import ProposeTransaction from './routes/ProposeTransaction';
 import Settings from './routes/Settings';
 import { AddressBookProvider, RemoteAddressBookLoader } from './address-book/AddressBookContext';
 import { AddressBookBar } from './address-book/AddressBookBar';
@@ -44,6 +45,7 @@ export default function App() {
                 <Route path="/safe/:network/:address" element={<SafeRouteProvider />}>
                   <Route index element={<SafeTransactions />} />
                   <Route path="tx/:nonce" element={<TransactionAnalysis />} />
+                  <Route path="propose" element={<ProposeTransaction />} />
                 </Route>
               </Routes>
             </main>
