@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **Proposer mode checks a transaction before it is proposed.** The Safe page links to it as "Check before proposing". A proposer pastes the JSON tab from the Safe web app, or enters the ten fields, and gets the decoding, security warnings and hashes that signers get for the queued transaction. Both pages use one analysis function and one review component.
+  - The input is checked strictly. An unknown or repeated key, a value shortened with `...` or `…`, whitespace inside hex, a mixed-case address with a bad EIP-55 checksum, odd-length data, a negative or non-decimal integer, and a JSON number too large to read exactly are rejected. Each message names the field. Nothing is analyzed until the input is valid.
+  - The nonce starts at the one the Safe web app proposes: the larger of the Safe's on-chain nonce and the highest queued nonce plus one. A pasted nonce wins. A nonce below the on-chain nonce shows that it is already used. A nonce that a queued transaction uses shows that the two compete, with a link to that nonce.
+  - The Safe API decoding comes from the Safe Transaction Service data decoder, `POST /api/v1/data-decoder/`. A failed or empty answer counts as no decoding, so the Sourcify fallback and the undecodable state apply.
+  - Status, confirmations, timeline, proposer, the same-nonce selector and the API hash comparison exist only for a queued transaction and are not shown. The hash section says once to compare the safeTxHash with the Hashes tab and with the hardware wallet.
+  - **Find in queue** looks up the computed safeTxHash in the Safe Transaction Service and opens the queued transaction, or says that it is not in the queue yet.
+  - Nothing entered goes to the URL or to browser storage.
+  - Core exports the parser (`parseSafeTxJson`, `readSafeTxJson`, `validateSafeTxFields`, `formatSafeTxJson`), the nonce checks (`recommendedProposalNonce`, `checkProposalNonce`) and three client calls (`decodeData`, `fetchTransactionByHash`, `fetchQueuedTransactions`), so the CLI can reuse them.
+  - The development mock answers the data decoder for fixture calldata and reports on-chain nonce 13, so nonces 13 and 14 count as queued.
+
+### Fixed
+
+- **A queued transaction without calldata showed "Error: Uint8Array expected".** The Safe Transaction Service reports empty calldata as `data: null`, and the hash calculation threw on it. Every such transaction failed to load, an on-chain rejection included. Empty calldata is now hashed as `0x`, and the computed safeTxHash matches the one the service reports.
+
 ## [0.5.0] — 2026-10-05
 
 A remote address book served from the tool's own origin, address book warnings that update whenever a label changes, and dependency upgrades that close the open Dependabot advisories.

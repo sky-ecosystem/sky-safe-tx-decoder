@@ -69,6 +69,14 @@ http://localhost:5173/#/safe/ethereum/0xfeEDfaCeFeEdFaceFEedFACefEEDFaCEfEeDfAce
 | 13 | `lifecycle-delegate-proposal` | A proposal submitted by a delegate: the delegate is the proposer, the delegator owner is on a `delegate of` line |
 | 14 | `lifecycle-delegate-no-owner` | The same, but the service recorded no owner: the delegate is still disclosed on a `proposed by a delegate` line |
 
+Proposer mode works on the sentinel Safe too:
+
+```
+http://localhost:5173/#/safe/ethereum/0xfeEDfaCeFeEdFaceFEedFACefEEDFaCEfEeDfAce/propose
+```
+
+The mock reports on-chain nonce 13, so nonces 0 to 12 count as used, 13 and 14 as queued, and the recommended nonce is 15. It answers the data decoder for a fixture's own calldata with that fixture's `dataDecoded`, or with 404 when the fixture has none. Other calldata goes to the real data decoder. Paste the JSON built from a fixture's fields to compare proposer mode with that fixture's transaction page.
+
 Nonces 4 and 5 are worth opening back to back. They share a key name and differ by a factor
 of 10^12.
 

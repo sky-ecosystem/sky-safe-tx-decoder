@@ -53,6 +53,16 @@ pnpm install
 pnpm --filter @shield3/sky-safe-ui dev
 ```
 
+#### Check before proposing
+
+Proposer mode checks a transaction before it is in the Safe Transaction Service queue. Open the Safe and select **Check before proposing**.
+
+- Paste the JSON tab of the pending transaction from the Safe web app, or enter the fields. The Data tab shortens some values. A shortened value is rejected.
+- The nonce starts at the one the Safe web app proposes. A nonce that is already used or already queued shows a warning.
+- The decoding, security warnings and hashes are the ones signers see for the queued transaction. Compare the safeTxHash with the Hashes tab and with your hardware wallet before you sign.
+- The Safe Transaction Service data decoder decodes the calldata. Nothing you enter is stored or put in the URL.
+- After you propose, **Find in queue** opens the queued transaction.
+
 #### Offline single-file build
 
 For the highest-assurance setup — no hosting provider, no server, no `npm` to
