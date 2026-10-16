@@ -51,10 +51,12 @@ import { checkReencode } from './sky-common.js'
 import {
   findPauControllerTable,
   findPauWire,
+  describeMaxExchangeRate,
   describeMaxSlippage,
   readPauAmount,
   pauFrozenTableCaveat,
   PAU_FUNCTION_NOTES,
+  PAU_MAX_EXCHANGE_RATE_FUNCTIONS,
   PAU_MAX_SLIPPAGE_FUNCTIONS,
   type PauControllerTable,
   type PauWire,
@@ -522,6 +524,13 @@ export class PAUAdministeredAgentDecoder implements CustomDecoder {
 
     const note = PAU_FUNCTION_NOTES[key]
 
+    // setMaxExchangeRate stores one derived rate, not its two arguments. State
+    // it in full so a signer can compare it with getMaxExchangeRate.
+    const exchangeRate = PAU_MAX_EXCHANGE_RATE_FUNCTIONS.has(key)
+      ? describeMaxExchangeRate(args[1] as bigint, args[2] as bigint)
+      : null
+    if (exchangeRate?.warning) warnings.push(`⚠️ ${position}: ${exchangeRate.warning}`)
+
     return {
       name: wire.abi.name,
       signature: wire.signature,
@@ -531,6 +540,7 @@ export class PAUAdministeredAgentDecoder implements CustomDecoder {
       explanation:
         context +
         (note ? `\n${note}\n` : '') +
+        (exchangeRate ? `\n${exchangeRate.stored}\n` : '') +
         (scaleNotes.length > 0
           ? `\n${scaleNotes.map(note => `${note}.`).join(' ')}\n`
           : ''),

@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import type { Hex } from 'viem';
 import {
   comparePauDispatch,
+  describeMaxExchangeRate,
   describeMaxSlippage,
   describePauDispatchMismatch,
   findPauControllerTable,
@@ -197,6 +198,109 @@ describe('the frozen Grove dispatch table', () => {
     );
     expect(other).toBeDefined();
     expect(other!.wires.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the frozen table for Controller 0x24169Afb34fAe4D4356BC54Bd80319131e35ca38', () => {
+  const second = findPauControllerTable(
+    PAU_DISPATCH_TABLES,
+    '0x24169Afb34fAe4D4356BC54Bd80319131e35ca38'
+  )!;
+
+  it('holds the 35 call selectors read from the Controller', () => {
+    // 15 from AAVE_FACET and USDS_FACET, 20 from PSM_FACET and ERC4626_FACET,
+    // which were wired at block 26176894.
+    expect(second.wires).toHaveLength(35);
+  });
+
+  /** Pinned as literals, for the same reason as the Grove entries above. */
+  it('maps the PSM swaps to PSMFacet 0xE4A5dAc768a310cc2316f258901b32E499653064', () => {
+    for (const [callSelector, delegateSelector, signature] of [
+      ['0x3f45168c', '0x5acb7053', 'swapUSDSToUSDC(uint256)'],
+      ['0x8c88adef', '0x115c48d5', 'swapUSDCToUSDS(uint256)'],
+    ] as const) {
+      const wire = findPauWire(second, callSelector)!;
+      expect(wire.facet).toBe('0xE4A5dAc768a310cc2316f258901b32E499653064');
+      expect(wire.facetName).toBe('PSMFacet');
+      expect(wire.delegateSelector).toBe(delegateSelector);
+      expect(wire.signature).toBe(signature);
+      expect(wire.integrationId).toBe(
+        '0x50534d5f46414345540000000000000000000000000000000000000000000000'
+      );
+    }
+  });
+
+  it('maps the ERC-4626 calls to ERC4626Facet 0x1dCA18608c89174181153E786778705b4A0E1a06', () => {
+    for (const [callSelector, delegateSelector, signature] of [
+      ['0xfc78974a', '0x0efe6a8b', 'deposit(address,uint256,uint256)'],
+      ['0xd04771b8', '0xb5c5f672', 'withdraw(address,uint256,uint256)'],
+      ['0xe7accdce', '0x2b83cccd', 'redeem(address,uint256,uint256)'],
+      ['0xa3124407', '0x7011df99', 'setMaxExchangeRate(address,uint256,uint256)'],
+    ] as const) {
+      const wire = findPauWire(second, callSelector)!;
+      expect(wire.facet).toBe('0x1dCA18608c89174181153E786778705b4A0E1a06');
+      expect(wire.facetName).toBe('ERC4626Facet');
+      expect(wire.delegateSelector).toBe(delegateSelector);
+      expect(wire.signature).toBe(signature);
+      expect(wire.integrationLabel).toBe('ERC4626_FACET');
+    }
+  });
+});
+
+describe('describeMaxExchangeRate', () => {
+  it('states the stored rate in full, rounded down', () => {
+    // 1e36 * 2e6 / 1e18: 2 USDC per share for an 18-decimal vault over USDC.
+    expect(describeMaxExchangeRate(10n ** 18n, 2_000_000n)).toEqual({
+      stored:
+        'Stores a max exchange rate of 1e36 * 2000000 / 1000000000000000000 = ' +
+        '2000000000000000000000000, rounded down. The rate counts raw asset units per raw ' +
+        'share unit.',
+    });
+    expect(describeMaxExchangeRate(3n, 1n).stored).toContain(
+      '= 333333333333333333333333333333333333,'
+    );
+  });
+
+  it('reads maxExpectedAssets 0 as blocking deposits, not as no cap', () => {
+    const reading = describeMaxExchangeRate(10n ** 18n, 0n);
+    expect(reading.stored).toContain('max exchange rate of 0');
+    expect(reading.warning).toContain('does NOT remove the cap');
+  });
+
+  it('reads both arguments 0 the same way, as the facet returns 0 before checking shares', () => {
+    expect(describeMaxExchangeRate(0n, 0n).warning).toContain('does NOT remove the cap');
+  });
+
+  it('warns that shares 0 with non-zero assets reverts', () => {
+    const reading = describeMaxExchangeRate(0n, 1n);
+    expect(reading.stored).toContain('Stores nothing');
+    expect(reading.warning).toContain('ERC4626Facet/zero-shares');
+  });
+});
+
+describe('readPauAmount for ERC4626Facet', () => {
+  const VAULT = '0x802148D518A6De2aF866f9A61ffB5e5C39156dB2';
+  const SUSDS = '0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD';
+  const DEPOSIT = 'deposit(address,uint256,uint256)';
+
+  it('leaves the asset amount unscaled and names its unit', () => {
+    const reading = readPauAmount('ethereum', 'ERC4626Facet', DEPOSIT, 1, 10n ** 12n, [VAULT, 10n ** 12n, 1n]);
+    expect(reading).toEqual({ scaled: null, note: 'counts units of the vault asset' });
+  });
+
+  it('denominates shares in the vault named by parameter 0', () => {
+    const unknown = readPauAmount('ethereum', 'ERC4626Facet', DEPOSIT, 2, 5n, [VAULT, 1n, 5n]);
+    expect(unknown.scaled).toBeNull();
+    expect(unknown.note).toBe(`is denominated in the shares of the vault named by parameter 0 (${VAULT})`);
+
+    const known = readPauAmount('ethereum', 'ERC4626Facet', DEPOSIT, 2, 10n ** 18n, [SUSDS, 1n, 10n ** 18n]);
+    expect(known).toEqual({ scaled: '1000000000000000000 = 1 sUSDS', note: null });
+  });
+
+  it('does not borrow the Basin or Aave denominations for a same-named function', () => {
+    const reading = readPauAmount('ethereum', 'ERC4626Facet', 'withdraw(address,uint256,uint256)', 1, 7n, [SUSDS, 7n, 1n]);
+    expect(reading.scaled).toBeNull();
+    expect(reading.note).toBe('counts units of the vault asset');
   });
 });
 
