@@ -1440,7 +1440,7 @@ export function TransactionReview({
             ) : (
               // Proposer mode states its one instruction here, once.
               <p className="text-sm text-blue-800">
-                Compare the safeTxHash with Safe&apos;s Hashes tab and with your hardware wallet before signing.
+                Compare the safeTxHash with Safe&apos;s Hashes tab and your hardware wallet. If they differ, do not sign.
               </p>
             )}
           </div>
