@@ -115,8 +115,31 @@ describe('pauVerificationTargets', () => {
     ).toEqual([]);
   });
 
-  it('ignores a call that is not batchCall', () => {
+  it('ignores a call that is neither batchCall nor call', () => {
     expect(pauVerificationTargets(GROVE_AGENT, '0xdeadbeef' as Hex)).toEqual([]);
+  });
+
+  it('finds the Controller and selector in call(address,bytes), nonce 23 of Safe 0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26', () => {
+    // The real calldata. call() is a batch of one: the UI's live check must
+    // cover it, or a call-path decoding would render with no verification.
+    const nonce23 =
+      '0x1b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca3800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000064d04771b8000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db20000000000000000000000000000000000000000000000000000005d21dba000000000000000000000000000000000000000000000005484860fb7f9de20c03700000000000000000000000000000000000000000000000000000000' as Hex;
+    const targets = pauVerificationTargets('0x1837505D104F7a6D8b7e19452610B0A3D652EF12', nonce23);
+    expect(targets).toEqual([
+      { controller: '0x24169Afb34fAe4D4356BC54Bd80319131e35ca38', callSelectors: ['0xd04771b8'] },
+    ]);
+  });
+
+  it('leaves out call(address,bytes) to a Controller with no frozen table', () => {
+    const data = encodeFunctionData({
+      abi: parseAbi(['function call(address target, bytes data)']),
+      functionName: 'call',
+      args: [
+        '0x0DD65461610Fe5b65cE50A870B10ED0F3d24d8C2',
+        '0xa5b7e02d000000000000000000000000000000000000000000000000000000000000002a',
+      ],
+    });
+    expect(pauVerificationTargets(GROVE_AGENT, data)).toEqual([]);
   });
 
   it('leaves out a Controller with no frozen table, which the decoder already refuses', () => {

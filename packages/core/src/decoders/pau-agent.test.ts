@@ -55,6 +55,16 @@ const REAL = {
     '0xe7accdce000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db2000000000000000000000000000000000000000000007ea954dee7dfbfcc32240000000000000000000000000000000000000000000000000000008b92d193c5',
 } as const satisfies Record<string, Hex>;
 
+/** The complete Safe transaction data of nonces 22, 23 and 24. */
+const REAL_NONCE_22: Hex =
+  '0x8d80ff0a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000032b001837505d104f7a6d8b7e19452610b0a3d652ef12000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a41b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca3800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000024a5b7e02d00000000000000000000000000000000000000000000d3c21bcecceda100000000000000000000000000000000000000000000000000000000000000001837505d104f7a6d8b7e19452610b0a3d652ef12000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a41b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca38000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000243f45168c000000000000000000000000000000000000000000000000000000e8d4a5100000000000000000000000000000000000000000000000000000000000001837505d104f7a6d8b7e19452610b0a3d652ef12000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e41b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca3800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000064fc78974a000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db2000000000000000000000000000000000000000000000000000000e8d4a5100000000000000000000000000000000000000000000000d2e2eb6c9f64d10bef6000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
+const REAL_NONCE_23: Hex =
+  '0x1b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca3800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000064d04771b8000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db20000000000000000000000000000000000000000000000000000005d21dba000000000000000000000000000000000000000000000005484860fb7f9de20c03700000000000000000000000000000000000000000000000000000000';
+const REAL_NONCE_24: Hex =
+  '0x1b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca3800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000064e7accdce000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db2000000000000000000000000000000000000000000007ea954dee7dfbfcc32240000000000000000000000000000000000000000000000000000008b92d193c500000000000000000000000000000000000000000000000000000000';
+
+const CALL_ABI = parseAbi(['function call(address target, bytes data)']);
+
 /** ERC4626Facet.setMaxExchangeRate through call selector 0xa3124407. */
 function setMaxExchangeRate(token: Address, shares: bigint, maxExpectedAssets: bigint): Hex {
   return ('0xa3124407' +
@@ -127,9 +137,13 @@ describe('PAUAdministeredAgentDecoder.canDecode', () => {
     );
   });
 
-  it('ignores call(address,bytes), which the Sourcify fallback covers', () => {
-    // AdministeredAgent.call is verified on Sourcify. Claiming it here would
-    // replace a working decoding with one this build has never seen exercised.
+  it('claims call(address,bytes) to its own agent', () => {
+    // Safe 0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26 reaches the second
+    // Controller through call as well as batchCall.
+    expect(decoder.canDecode(GROVE_AGENT, '0x1b8b921d' as Hex)).toBe(true);
+  });
+
+  it('ignores call(address,uint256,bytes), which the agent does not declare', () => {
     expect(decoder.canDecode(GROVE_AGENT, '0x6dbf2fa0' as Hex)).toBe(false);
   });
 
@@ -482,8 +496,8 @@ describe('batch-level checks', () => {
     ]);
   });
 
-  it('exposes only batchCall as supported', () => {
-    expect(decoder.getSupportedFunctions()).toEqual(['batchCall']);
+  it('exposes batchCall and call as supported', () => {
+    expect(decoder.getSupportedFunctions()).toEqual(['batchCall', 'call']);
   });
 });
 
@@ -495,7 +509,7 @@ describe('batch-level checks', () => {
  * calldata of executed transactions from Safe
  * 0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26, nonces 22 to 24. Those
  * transactions use AdministeredAgent.call; here the same bytes are wrapped in
- * batchCall.
+ * batchCall, and the call path is tested separately below.
  */
 describe('the PSM and ERC-4626 facets on the second Controller', () => {
   const second = new PAUAdministeredAgentDecoder({
@@ -643,6 +657,85 @@ describe('the PSM and ERC-4626 facets on the second Controller', () => {
     expect(decoded.main.riskLevel).toBe('medium');
     expect(decoded.generalWarnings).toBeUndefined();
     expect(decoded.main.warnings!.filter(isPauFrozenTableCaveat)).toHaveLength(1);
+  });
+});
+
+/**
+ * AdministeredAgent.call(address,bytes), `0x1b8b921d`.
+ *
+ * Every executed transaction that reaches the new facets uses it: Safe
+ * 0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26 nonces 22 to 25. The payloads
+ * below are those transactions' real calldata.
+ */
+describe('AdministeredAgent.call', () => {
+  const second = new PAUAdministeredAgentDecoder({
+    address: SECOND_AGENT,
+    label: 'PAU AdministeredAgent 0x1837505D104F7a6D8b7e19452610B0A3D652EF12',
+    network: 'ethereum',
+  });
+
+  it('decodes nonce 23, a direct call to the agent, as a batch of one', () => {
+    expect(second.canDecode(SECOND_AGENT, REAL_NONCE_23)).toBe(true);
+    const decoded = second.decode(REAL_NONCE_23);
+
+    expect(decoded.isMulticall).toBe(true);
+    expect(decoded.main.name).toBe('call');
+    expect(decoded.main.signature).toBe('call(address,bytes)');
+    expect(decoded.main.parameters).toEqual([]);
+    expect(decoded.generalWarnings).toBeUndefined();
+    expect(decoded.main.warnings!.filter(isPauFrozenTableCaveat)).toHaveLength(1);
+
+    expect(decoded.nested).toHaveLength(1);
+    const withdraw = decoded.nested![0]!;
+    expect(withdraw.signature).toBe('withdraw(address,uint256,uint256)');
+    expect(withdraw.target).toBe(SECOND_CONTROLLER);
+    expect(withdraw.rawCalldata).toBe(REAL.withdraw);
+    expect(paramValue(withdraw, 'token')).toBe(OSERO_VAULT);
+  });
+
+  it('decodes nonce 24, redeem', () => {
+    const decoded = second.decode(REAL_NONCE_24);
+    expect(decoded.nested![0]!.signature).toBe('redeem(address,uint256,uint256)');
+    expect(decoded.nested![0]!.rawCalldata).toBe(REAL.redeem);
+  });
+
+  it('decodes each agent call inside the nonce 22 MultiSend', () => {
+    const inner = decodeMultiSend(REAL_NONCE_22);
+    expect(inner).not.toBeNull();
+    const agentCalls = inner!.filter(item => item.to.toLowerCase() === SECOND_AGENT.toLowerCase());
+    expect(agentCalls).toHaveLength(3);
+    const names = agentCalls.map(item => {
+      expect(second.canDecode(item.to as Address, item.data as Hex)).toBe(true);
+      return second.decode(item.data as Hex).nested![0]!.name;
+    });
+    expect(names).toEqual(['mint', 'swapUSDSToUSDC', 'deposit']);
+  });
+
+  it('states that call forwards the ETH sent to the agent, not a number', () => {
+    // msg.value is not in the calldata. A "0 wei" here would be a guess.
+    const call = second.decode(REAL_NONCE_23).nested![0]!;
+    expect(call.explanation).toMatch(
+      bullet('ETH value', 'the value sent to the AdministeredAgent, which call forwards in full')
+    );
+    expect(call.explanation).not.toContain('0 wei');
+  });
+
+  it('refuses to name a call selector the table does not hold', () => {
+    const data = encodeFunctionData({
+      abi: CALL_ABI,
+      functionName: 'call',
+      args: [SECOND_CONTROLLER, '0xdeadbeef0000000000000000000000000000000000000000000000000000000000000001'],
+    });
+    const decoded = second.decode(data);
+    expect(decoded.nested![0]!.name).toBe('unknown call selector');
+    expect(decoded.main.riskLevel).toBe('high');
+    expect(decoded.main.warnings!.join('\n')).toContain('0xdeadbeef');
+  });
+
+  it('reports trailing calldata on call rather than decoding around it', () => {
+    const decoded = second.decode((REAL_NONCE_23 + 'deadbeef') as Hex);
+    expect(decoded.main.warnings!.join('\n')).toMatch(/Extra|trailing/i);
+    expect(decoded.main.riskLevel).toBe('medium');
   });
 });
 

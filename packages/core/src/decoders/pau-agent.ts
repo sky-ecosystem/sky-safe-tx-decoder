@@ -36,10 +36,13 @@
  * as a batch-level caveat — once for the batch, not once per call — which a
  * surface that runs the live check drops. See `pauFrozenTableCaveat`.
  *
- * `AdministeredAgent.call(address,bytes)` is deliberately NOT decoded here.
- * Every observed PAU allocator transaction uses `batchCall`, and the
- * AdministeredAgent is verified on Sourcify, so a `call` falls through to the
- * Sourcify fallback rather than to a path this decoder has never seen exercised.
+ * `AdministeredAgent.call(address,bytes)` is decoded the same way, as a batch of
+ * one. Safe 0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26 sends Controller calls
+ * through `call` as well as `batchCall`: nonces 2, 3, 4 and 22 to 25. Without
+ * this, the Safe API decodes the outer `call` and leaves the Controller call
+ * as opaque `bytes`, with no warning. `call` forwards `msg.value`, which is not
+ * in its calldata, so the decoded call states where its ETH value comes from
+ * instead of a number.
  *
  * Source: https://github.com/sky-ecosystem/diamond-pau
  */
@@ -64,7 +67,7 @@ import {
 import { PAU_DISPATCH_TABLES } from './pau-dispatch-table.js'
 
 /**
- * The one AdministeredAgent function this decoder handles.
+ * The two AdministeredAgent functions this decoder handles.
  *
  * Transcribed from the source verified on Sourcify,
  * `lib/pau-administered-agent/src/AdministeredAgent.sol:AdministeredAgent`,
@@ -72,10 +75,14 @@ import { PAU_DISPATCH_TABLES } from './pau-dispatch-table.js'
  */
 const ADMINISTERED_AGENT_ABI = parseAbi([
   'function batchCall(address[] targets, bytes[] data, uint256[] values)',
+  'function call(address target, bytes data)',
 ])
 
 /** `batchCall(address[],bytes[],uint256[])`. */
 export const PAU_BATCH_CALL_SELECTOR = '0x4e120423'
+
+/** `call(address,bytes)`. Forwards `msg.value` to the target. */
+export const PAU_CALL_SELECTOR = '0x1b8b921d'
 
 /** An AdministeredAgent this decoder is registered for. */
 export interface PauAdministeredAgent {
@@ -166,9 +173,10 @@ export class PAUAdministeredAgentDecoder implements CustomDecoder {
   }
 
   canDecode(to: Address, data: Hex): boolean {
+    const selector = data.slice(0, 10).toLowerCase()
     return (
       to.toLowerCase() === this.contractAddress.toLowerCase() &&
-      data.slice(0, 10).toLowerCase() === PAU_BATCH_CALL_SELECTOR
+      (selector === PAU_BATCH_CALL_SELECTOR || selector === PAU_CALL_SELECTOR)
     )
   }
 
@@ -179,11 +187,6 @@ export class PAUAdministeredAgentDecoder implements CustomDecoder {
     })
 
     const decodedArgs = (args ?? []) as readonly unknown[]
-    const [targets, calls, values] = decodedArgs as [
-      readonly Address[],
-      readonly Hex[],
-      readonly bigint[],
-    ]
 
     // Re-encode and byte-compare the outer call. viem's decoder ignores bytes
     // appended past the end of the encoded arguments, so without this check a
@@ -191,11 +194,26 @@ export class PAUAdministeredAgentDecoder implements CustomDecoder {
     // ordinary batch.
     const reencode = checkReencode(ADMINISTERED_AGENT_ABI, functionName, decodedArgs, data)
 
-    const nested = targets.map((target, i) =>
-      this.decodeControllerCall(target, calls[i] ?? '0x', values[i] ?? 0n, i, targets.length)
-    )
+    let nested: DecodedFunction[]
+    let main: DecodedFunction
 
-    const main = this.describeBatch(targets, calls, values, nested)
+    if (functionName === 'call') {
+      // A batch of one. The ETH value is msg.value, which the calldata does not
+      // carry, so it is passed as null rather than as a guessed zero.
+      const [target, call] = decodedArgs as [Address, Hex]
+      nested = [this.decodeControllerCall(target, call, null, 0, 1)]
+      main = this.describeCall(target, nested)
+    } else {
+      const [targets, calls, values] = decodedArgs as [
+        readonly Address[],
+        readonly Hex[],
+        readonly bigint[],
+      ]
+      nested = targets.map((target, i) =>
+        this.decodeControllerCall(target, calls[i] ?? '0x', values[i] ?? 0n, i, targets.length)
+      )
+      main = this.describeBatch(targets, calls, values, nested)
+    }
 
     // Anything a nested call flagged is lifted onto the batch, because the
     // nested-call cards in the UI render name, signature, explanation and
@@ -243,7 +261,32 @@ export class PAUAdministeredAgentDecoder implements CustomDecoder {
   }
 
   getSupportedFunctions(): string[] {
-    return ['batchCall']
+    return ['batchCall', 'call']
+  }
+
+  /**
+   * `call(address target, bytes data)`: one forwarded call.
+   *
+   * Same shape as a batch: no per-call rows here, and the call itself carries
+   * its target and calldata. The frozen-table caveat is carried here once, as
+   * for a batch.
+   */
+  private describeCall(target: Address, nested: readonly DecodedFunction[]): DecodedFunction {
+    const warnings: string[] = []
+    const table = findPauControllerTable(this.tables, target)
+    if (table) warnings.push(pauFrozenTableCaveat(table.frozenAtBlock, table.frozenAtDate))
+
+    return {
+      name: 'call',
+      signature: 'call(address,bytes)',
+      parameters: [],
+      explanation:
+        `Forwards 1 call through the Sky PAU AdministeredAgent ${this.contractAddress}, with ` +
+        `the ETH value sent to the agent. The call below shows the function that executes ` +
+        `and its arguments.`,
+      warnings,
+      riskLevel: nested.some(call => call.riskLevel === 'high') ? 'high' : 'medium',
+    }
   }
 
   /**
@@ -320,7 +363,7 @@ export class PAUAdministeredAgentDecoder implements CustomDecoder {
   private decodeControllerCall(
     target: Address,
     data: Hex,
-    value: bigint,
+    value: bigint | null,
     index: number,
     total: number
   ): DecodedFunction {
@@ -417,7 +460,7 @@ export class PAUAdministeredAgentDecoder implements CustomDecoder {
     wire: PauWire,
     controller: Address,
     data: Hex,
-    value: bigint,
+    value: bigint | null,
     position: string
   ): DecodedFunction {
     // The Controller forwards msg.data[4:] verbatim under the delegate
@@ -567,9 +610,17 @@ export function createPauAgentDecoders(
  *
  * Always present. A batch that forwards value is unusual for PAU, and a signer
  * has to be able to see the zero as easily as the non-zero.
+ *
+ * `null` is `AdministeredAgent.call`, which forwards `msg.value`. That amount
+ * is the value of the call to the agent, shown on the transaction, and is not
+ * in this calldata. A number here would be a guess.
  */
-function valueBullet(value: bigint): string {
-  return `  • ETH value — ${value.toString()} wei\n`
+function valueBullet(value: bigint | null): string {
+  const amount =
+    value === null
+      ? 'the value sent to the AdministeredAgent, which call forwards in full'
+      : `${value.toString()} wei`
+  return `  • ETH value — ${amount}\n`
 }
 
 /** The full 4-byte selector of a call, or `0x` when there is none. */
