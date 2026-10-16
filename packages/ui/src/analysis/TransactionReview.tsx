@@ -432,11 +432,17 @@ export function TransactionReview({
   analyzed,
   hashCheck,
   beforeHashes,
+  onRetryDecoder,
 }: {
   analyzed: AnalyzedTransaction;
   hashCheck: HashCheck;
   /** Rendered between the transaction data and the hashes. */
   beforeHashes?: ReactNode;
+  /**
+   * Proposer mode: ask Safe's data decoder again. Offered only where the
+   * decoder did not answer and nothing else decoded the call.
+   */
+  onRetryDecoder?: () => void;
 }) {
   const { network, chainId, transaction, hashes, customDecoded, multiSendTxs, apiDecodedVerification, multiSendVerification } =
     analyzed;
@@ -836,7 +842,13 @@ export function TransactionReview({
               <button
                 onClick={() => setViewMode('decoded')}
                 disabled={showRawOnly}
-                title={showRawOnly ? 'Not decoded: no ABI found. Showing raw data.' : undefined}
+                title={
+                  showRawOnly
+                    ? analyzed.apiDecoderFailed
+                      ? "Not decoded: Safe's decoder did not answer. Showing raw data."
+                      : 'Not decoded: no ABI found. Showing raw data.'
+                    : undefined
+                }
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   showRawOnly
                     ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
@@ -882,7 +894,24 @@ export function TransactionReview({
 
           {undecodable && !sourcifyTop && !sourcifyPendingTop && (
             <div className="mb-6 bg-amber-50 border-2 border-amber-400 rounded-lg p-4">
-              <p className="font-semibold text-amber-900">Not decoded: no ABI found</p>
+              {/* A decoder that did not answer is not a decoder that found
+                  nothing. Say which, and offer the retry only for the first. */}
+              {analyzed.apiDecoderFailed ? (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <p className="font-semibold text-amber-900">Not decoded: Safe&apos;s decoder did not answer.</p>
+                  {onRetryDecoder && (
+                    <button
+                    type="button"
+                    onClick={onRetryDecoder}
+                    className="px-3 py-1 text-xs font-semibold rounded border border-amber-500 bg-white text-amber-900 hover:bg-amber-100"
+                  >
+                    Retry
+                  </button>
+                  )}
+                </div>
+              ) : (
+                <p className="font-semibold text-amber-900">Not decoded: no ABI found</p>
+              )}
               <p className="text-sm text-amber-900 mt-1">
                 Verify the raw data below independently before signing.
               </p>
@@ -1232,7 +1261,24 @@ export function TransactionReview({
                               </div>
                             ) : (
                               <div className="bg-amber-50 rounded p-3 border border-amber-200">
-                                <p className="font-semibold text-amber-900 mb-1">Not decoded: no ABI found</p>
+                                {analyzed.apiDecoderFailed ? (
+                                  <div className="flex items-center gap-3 flex-wrap mb-1">
+                                    <p className="font-semibold text-amber-900">
+                                      Not decoded: Safe&apos;s decoder did not answer.
+                                    </p>
+                                    {onRetryDecoder && (
+                                      <button
+                                        type="button"
+                                        onClick={onRetryDecoder}
+                                        className="px-3 py-1 text-xs font-semibold rounded border border-amber-500 bg-white text-amber-900 hover:bg-amber-100"
+                                      >
+                                        Retry
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <p className="font-semibold text-amber-900 mb-1">Not decoded: no ABI found</p>
+                                )}
                                 <p className="text-xs text-amber-800 mb-3">
                                   Verify the calldata below independently before signing.
                                   {!sourcifyFallback &&

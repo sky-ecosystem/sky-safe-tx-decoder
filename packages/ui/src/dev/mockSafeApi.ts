@@ -56,6 +56,12 @@ export const MOCK_SAFE_ADDRESS = '0xfeEDfaCeFeEdFaceFEedFACefEEDFaCEfEeDfAce'
 declare global {
   interface Window {
     __safeApiMockAddress?: string
+    /**
+     * Set to 500 or 429 in the browser console to make the data decoder fail
+     * on the sentinel Safe's pages, to review the "decoder did not answer"
+     * state. Delete it, or set it to undefined, to answer again.
+     */
+    __safeApiMockDecoderFailure?: number
   }
 }
 
@@ -176,18 +182,24 @@ export function installMockSafeApi(): void {
     // so it is answered only while a sentinel Safe page is on screen, and only
     // for a fixture's own calldata. The answer is that fixture's dataDecoded,
     // so a fixture checked in proposer mode decodes as it does on its
-    // transaction page. A fixture without one gets a 404, which the client
-    // reads as no decoding, the same as the null the fixture carries. Any
-    // other calldata goes to the real service.
+    // transaction page. A fixture without one gets a 200 with a null body,
+    // which the client reads as no decoding, the same as the null the fixture
+    // carries. Any other calldata goes to the real service.
+    //
+    // While window.__safeApiMockDecoderFailure is set, every such request on a
+    // sentinel Safe page fails with that status instead.
     if (/\/api\/v1\/data-decoder\/$/.test(url) && onSentinelRoute()) {
+      const failure = window.__safeApiMockDecoderFailure
+      if (failure !== undefined) {
+        return new Response(JSON.stringify({ detail: `Simulated data decoder failure ${failure}` }), {
+          status: failure,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
       const fixture = fixtureForCall(await requestBody(input, init))
       if (fixture) {
         const decoded = fixture.transaction.dataDecoded
-        if (decoded) return json(decoded)
-        return new Response(JSON.stringify({ detail: 'Fixture has no dataDecoded' }), {
-          status: 404,
-          headers: { 'content-type': 'application/json' },
-        })
+        return decoded ? json(decoded) : json(null)
       }
     }
 

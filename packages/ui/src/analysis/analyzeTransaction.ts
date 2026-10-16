@@ -73,6 +73,12 @@ export interface AnalyzedTransaction {
   transaction: TransactionFields;
   /** The Safe API's decoding of the calldata, as received. */
   dataDecoded: SafeApiDataDecoded | null;
+  /**
+   * Proposer mode only: the data decoder gave no usable answer, so
+   * `dataDecoded` is null for want of an answer, not because the service has
+   * no decoding. Always false on the queued page, which reads the record.
+   */
+  apiDecoderFailed: boolean;
   hashes: SafeTxHashResult;
   customDecoded: DecodedTransactionData | null;
   multiSendTxs: MultiSendItem[] | null;
@@ -135,6 +141,8 @@ export function analyzeTransaction(input: {
   version: string;
   transaction: TransactionFields;
   dataDecoded: SafeApiDataDecoded | null;
+  /** See AnalyzedTransaction.apiDecoderFailed. */
+  apiDecoderFailed?: boolean;
 }): AnalyzedTransaction {
   const { network, chainId, safeAddress, version, transaction: tx, dataDecoded } = input;
 
@@ -216,6 +224,7 @@ export function analyzeTransaction(input: {
     version,
     transaction: tx,
     dataDecoded,
+    apiDecoderFailed: input.apiDecoderFailed ?? false,
     hashes,
     customDecoded,
     multiSendTxs,

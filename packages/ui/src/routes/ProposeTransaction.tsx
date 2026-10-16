@@ -69,6 +69,10 @@ const FIELD_LABELS: Partial<Record<SafeTxField, string>> = {
 
 const WIDE_FIELDS: SafeTxField[] = ['to', 'data', 'gasToken', 'refundReceiver'];
 
+function decoderCacheKey(network: string, to: string, data: string): string {
+  return `${network}|${to}|${data}`;
+}
+
 function rateLimitAware(err: unknown, fallback: string): string {
   if (err instanceof Error) {
     if (err.message.includes('429') || err.message.toLowerCase().includes('rate limit')) {
@@ -106,10 +110,13 @@ export default function ProposeTransaction() {
   const analyzedRef = useRef<AnalyzedTransaction | null>(null);
   analyzedRef.current = analyzed;
 
-  // Safe API decodings already fetched in this visit, by target and calldata,
-  // so editing the nonce or a gas field does not ask the service again. In
-  // memory only, and gone when the page closes.
-  const decoderCache = useRef(new Map<string, SafeApiDataDecoded>());
+  // Data decoder answers already received in this visit, by target and
+  // calldata, so editing the nonce or a gas field does not ask the service
+  // again. A failed call is not an answer and is not kept. In memory only,
+  // and gone when the page closes.
+  const decoderCache = useRef(new Map<string, SafeApiDataDecoded | null>());
+  // Bumped by Retry, to run the analysis again for the same fields.
+  const [decoderRetry, setDecoderRetry] = useState(0);
 
   // The Safe's version, on-chain nonce and queue. Read once per Safe. A new
   // Safe starts from an empty form: nothing entered for one Safe carries over.
@@ -211,11 +218,19 @@ export default function ProposeTransaction() {
     const timer = setTimeout(async () => {
       try {
         const fieldsForAnalysis = fieldsFromSafeTransactionData(validTransaction);
-        const cacheKey = `${network}|${fieldsForAnalysis.to}|${fieldsForAnalysis.data}`;
-        let dataDecoded = decoderCache.current.get(cacheKey) ?? null;
-        if (!dataDecoded) {
-          dataDecoded = await new SafeApiClient(network).decodeData(fieldsForAnalysis.data, fieldsForAnalysis.to);
-          if (dataDecoded) decoderCache.current.set(cacheKey, dataDecoded);
+        const cacheKey = decoderCacheKey(network, fieldsForAnalysis.to, fieldsForAnalysis.data);
+        let dataDecoded: SafeApiDataDecoded | null = null;
+        let apiDecoderFailed = false;
+        if (decoderCache.current.has(cacheKey)) {
+          dataDecoded = decoderCache.current.get(cacheKey) ?? null;
+        } else {
+          const result = await new SafeApiClient(network).decodeData(fieldsForAnalysis.data, fieldsForAnalysis.to);
+          if (result.status === 'failed') {
+            apiDecoderFailed = true;
+          } else {
+            dataDecoded = result.status === 'decoded' ? result.decoded : null;
+            decoderCache.current.set(cacheKey, dataDecoded);
+          }
         }
         if (cancelled) return;
         setAnalyzed(
@@ -226,6 +241,7 @@ export default function ProposeTransaction() {
             version: safeState.version,
             transaction: fieldsForAnalysis,
             dataDecoded,
+            apiDecoderFailed,
           })
         );
       } catch (err) {
@@ -240,7 +256,13 @@ export default function ProposeTransaction() {
       clearTimeout(timer);
     };
     // validKey stands for validTransaction, which is a new object each render.
-  }, [validKey, safeState, network, chainId, address]);
+  }, [validKey, safeState, network, chainId, address, decoderRetry]);
+
+  const retryDecoder = () => {
+    if (!analyzed) return;
+    decoderCache.current.delete(decoderCacheKey(network, analyzed.transaction.to, analyzed.transaction.data));
+    setDecoderRetry((n) => n + 1);
+  };
 
   // The nonce warnings depend on the nonce alone, so they show while another
   // field is still invalid.
@@ -450,7 +472,7 @@ export default function ProposeTransaction() {
 
       {analyzed && (
         <>
-          <TransactionReview analyzed={analyzed} hashCheck={{ kind: 'proposal' }} />
+          <TransactionReview analyzed={analyzed} hashCheck={{ kind: 'proposal' }} onRetryDecoder={retryDecoder} />
 
           <div className="flex items-center gap-3 flex-wrap">
             <button

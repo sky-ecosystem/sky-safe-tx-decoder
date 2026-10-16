@@ -24,7 +24,8 @@ const TRANSFER_DECODED = {
 };
 const SAFE_TX_HASH = '0x3afdbbdfca4f869f5918b012b771f7cd6aa2dc63c80bf63169dc82502663e3b5';
 
-type Answer = { status: number; body?: unknown; statusText?: string } | Error;
+/** `raw` is the body text as sent. Otherwise `body` is sent as JSON, and an absent body as an empty one. */
+type Answer = { status: number; body?: unknown; raw?: string; statusText?: string } | Error;
 
 function stubFetch(answers: Answer[]) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -40,6 +41,7 @@ function stubFetch(answers: Answer[]) {
         status: answer.status,
         statusText: answer.statusText ?? '',
         json: async () => answer.body,
+        text: async () => answer.raw ?? (answer.body === undefined ? '' : JSON.stringify(answer.body)),
       };
     })
   );
@@ -54,8 +56,8 @@ afterEach(() => {
 describe('decodeData', () => {
   it('POSTs data and to to the data decoder and returns its decoding', async () => {
     const calls = stubFetch([{ status: 200, body: TRANSFER_DECODED }]);
-    const decoded = await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC);
-    expect(decoded).toEqual(TRANSFER_DECODED);
+    const result = await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC);
+    expect(result).toEqual({ status: 'decoded', decoded: TRANSFER_DECODED });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe(`${BASE}/api/v1/data-decoder/`);
     expect(calls[0]!.init?.method).toBe('POST');
@@ -63,37 +65,69 @@ describe('decodeData', () => {
     expect(JSON.parse(calls[0]!.init?.body as string)).toEqual({ data: TRANSFER_DATA, to: USDC });
   });
 
-  it('makes no request for empty calldata', async () => {
+  it('answers none for empty calldata, without a request', async () => {
     const calls = stubFetch([]);
-    expect(await new SafeApiClient('ethereum').decodeData('0x', USDC)).toBeNull();
+    expect(await new SafeApiClient('ethereum').decodeData('0x', USDC)).toEqual({ status: 'none' });
     expect(calls).toHaveLength(0);
   });
 
-  it("returns the service's fallback sentinel unchanged", async () => {
+  it("returns the service's fallback sentinel unchanged, as a decoding", async () => {
     stubFetch([{ status: 200, body: { method: 'fallback', parameters: [] } }]);
     expect(await new SafeApiClient('ethereum').decodeData('0xdeadbeef', USDC)).toEqual({
-      method: 'fallback',
-      parameters: [],
+      status: 'decoded',
+      decoded: { method: 'fallback', parameters: [] },
     });
   });
 
-  it('returns null for a non-2xx answer', async () => {
-    for (const status of [400, 404, 422, 500]) {
+  it('answers none for an empty or null body', async () => {
+    for (const raw of ['', '   ', 'null']) {
+      stubFetch([{ status: 200, raw }]);
+      expect(await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC)).toEqual({ status: 'none' });
+    }
+  });
+
+  it('fails on a non-2xx answer, naming the status', async () => {
+    for (const status of [400, 404, 422, 500, 503]) {
       stubFetch([{ status, body: { detail: 'x' } }]);
-      expect(await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC)).toBeNull();
+      expect(await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC)).toEqual({
+        status: 'failed',
+        reason: `HTTP ${status}`,
+      });
     }
   });
 
-  it('returns null for an empty or malformed body', async () => {
-    for (const body of [null, {}, [], 'transfer', { method: 'transfer' }, { parameters: [] }]) {
+  it('fails on a body that is not a decoding', async () => {
+    for (const body of [
+      {},
+      [],
+      'transfer',
+      42,
+      { method: 'transfer' },
+      { parameters: [] },
+      { method: 1, parameters: [] },
+    ]) {
       stubFetch([{ status: 200, body }]);
-      expect(await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC)).toBeNull();
+      expect(await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC)).toEqual({
+        status: 'failed',
+        reason: 'the answer is not a decoding',
+      });
     }
   });
 
-  it('returns null on a network failure', async () => {
+  it('fails on a body that is not JSON', async () => {
+    stubFetch([{ status: 200, raw: '<html>gateway</html>' }]);
+    expect(await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC)).toEqual({
+      status: 'failed',
+      reason: 'the answer is not JSON',
+    });
+  });
+
+  it('fails on a network failure', async () => {
     stubFetch([new TypeError('Failed to fetch')]);
-    expect(await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC)).toBeNull();
+    expect(await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC)).toEqual({
+      status: 'failed',
+      reason: 'Failed to fetch',
+    });
   });
 
   it('retries a rate-limited request with the client backoff', async () => {
@@ -102,17 +136,18 @@ describe('decodeData', () => {
     const retries: string[] = [];
     const pending = new SafeApiClient('ethereum', (message) => retries.push(message)).decodeData(TRANSFER_DATA, USDC);
     await vi.advanceTimersByTimeAsync(1000);
-    expect(await pending).toEqual(TRANSFER_DECODED);
+    expect(await pending).toEqual({ status: 'decoded', decoded: TRANSFER_DECODED });
     expect(calls).toHaveLength(2);
     expect(retries).toHaveLength(1);
   });
 
-  it('returns null when rate limiting outlasts the retries', async () => {
+  it('fails when rate limiting outlasts the retries', async () => {
     vi.useFakeTimers();
-    stubFetch([{ status: 429 }, { status: 429 }, { status: 429 }, { status: 429 }]);
+    const calls = stubFetch([{ status: 429 }, { status: 429 }, { status: 429 }, { status: 429 }]);
     const pending = new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC);
     await vi.advanceTimersByTimeAsync(1000 + 2000 + 4000);
-    expect(await pending).toBeNull();
+    expect(await pending).toEqual({ status: 'failed', reason: 'rate limited' });
+    expect(calls).toHaveLength(4);
   });
 });
 

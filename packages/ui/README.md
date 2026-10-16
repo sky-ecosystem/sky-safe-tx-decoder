@@ -75,7 +75,7 @@ Proposer mode works on the sentinel Safe too:
 http://localhost:5173/#/safe/ethereum/0xfeEDfaCeFeEdFaceFEedFACefEEDFaCEfEeDfAce/propose
 ```
 
-The mock reports on-chain nonce 13, so nonces 0 to 12 count as used, 13 and 14 as queued, and the recommended nonce is 15. It answers the data decoder for a fixture's own calldata with that fixture's `dataDecoded`, or with 404 when the fixture has none. Other calldata goes to the real data decoder. Paste the JSON built from a fixture's fields to compare proposer mode with that fixture's transaction page.
+The mock reports on-chain nonce 13, so nonces 0 to 12 count as used, 13 and 14 as queued, and the recommended nonce is 15. It answers the data decoder for a fixture's own calldata with that fixture's `dataDecoded`, or with a `null` body when the fixture has none. Other calldata goes to the real data decoder. To review the state where Safe's decoder does not answer, run `window.__safeApiMockDecoderFailure = 500` (or `429`) in the browser console. Every data decoder request on a sentinel Safe page then fails with that status. Run `delete window.__safeApiMockDecoderFailure` and select Retry to answer again. Paste the JSON built from a fixture's fields to compare proposer mode with that fixture's transaction page.
 
 Nonces 4 and 5 are worth opening back to back. They share a key name and differ by a factor
 of 10^12.

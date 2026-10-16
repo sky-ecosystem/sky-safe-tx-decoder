@@ -29,6 +29,18 @@ export class SafeApiError extends Error {
 }
 
 /**
+ * Outcome of a data decoder call. See `SafeApiClient.decodeData`.
+ *
+ * `decoded` may hold the service's `fallback` sentinel, which callers treat as
+ * no decoding. `failed` means the service gave no usable answer, which is not
+ * the same as an answer of "no decoding".
+ */
+export type DecodeDataResult =
+  | { status: 'decoded'; decoded: SafeApiDataDecoded }
+  | { status: 'none' }
+  | { status: 'failed'; reason: string }
+
+/**
  * Callback for retry notifications
  */
 export type RetryCallback = (message: string, attempt: number, maxRetries: number, delay: number) => void
@@ -332,23 +344,28 @@ export class SafeApiClient {
    * including `valueDecoded` for a MultiSend. Checked against the live
    * service: for an existing transaction it returns that record's
    * `dataDecoded` exactly. For a selector it does not know, the service
-   * answers 200 with its `fallback` sentinel. That is returned unchanged, so
-   * callers handle it with `isApiFallbackSentinel` as they do for a record.
+   * answers 200 with its `fallback` sentinel. That comes back as `decoded`,
+   * unchanged, so callers handle it with `isApiFallbackSentinel` as they do
+   * for a record.
    *
-   * Returns null when there is no decoding to use: empty calldata (the
-   * service rejects `0x` with 422), any other non-2xx answer, a network
-   * failure, rate limiting that outlasts the retries, or a body without a
-   * method name and parameter list.
+   * The result keeps two outcomes apart that a caller must not merge:
+   *
+   * - `none`: the service has no decoding to give. Empty calldata (no
+   *   request is sent, since the service rejects `0x` with 422), or a 2xx
+   *   answer with an empty or `null` body.
+   * - `failed`: the service did not answer usefully. A non-2xx status, rate
+   *   limiting that outlasts the retries, a network failure, or a body that
+   *   is not a decoding. Nothing is known about the call.
    *
    * @param data - Calldata to decode
    * @param to - Call target. The service uses it to pick a contract's ABI.
    */
-  async decodeData(data: Hex, to?: Address): Promise<SafeApiDataDecoded | null> {
-    if (!data || data === '0x') return null
+  async decodeData(data: Hex, to?: Address): Promise<DecodeDataResult> {
+    if (!data || data === '0x') return { status: 'none' }
 
     const endpoint = `${this.baseUrl}/api/v1/data-decoder/`
     try {
-      return await retryWithBackoff(async () => {
+      return await retryWithBackoff(async (): Promise<DecodeDataResult> => {
         const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -358,18 +375,38 @@ export class SafeApiClient {
         if (response.status === 429) {
           throw new SafeApiError('Safe API rate limit', 429)
         }
-        if (!response.ok) return null
-
-        const body = (await response.json()) as unknown
-        if (!body || typeof body !== 'object') return null
-        const decoded = body as Partial<SafeApiDataDecoded>
-        if (typeof decoded.method !== 'string' || !Array.isArray(decoded.parameters)) {
-          return null
+        if (!response.ok) {
+          return { status: 'failed', reason: `HTTP ${response.status}` }
         }
-        return decoded as SafeApiDataDecoded
+
+        const text = (await response.text()).trim()
+        if (text === '' || text === 'null') return { status: 'none' }
+
+        let body: unknown
+        try {
+          body = JSON.parse(text)
+        } catch {
+          return { status: 'failed', reason: 'the answer is not JSON' }
+        }
+        const decoded = body as Partial<SafeApiDataDecoded> | null
+        if (
+          !decoded ||
+          typeof decoded !== 'object' ||
+          typeof decoded.method !== 'string' ||
+          !Array.isArray(decoded.parameters)
+        ) {
+          return { status: 'failed', reason: 'the answer is not a decoding' }
+        }
+        return { status: 'decoded', decoded: decoded as SafeApiDataDecoded }
       }, 3, 1000, this.onRetry)
-    } catch {
-      return null
+    } catch (error) {
+      if (error instanceof SafeApiError && error.statusCode === 429) {
+        return { status: 'failed', reason: 'rate limited' }
+      }
+      return {
+        status: 'failed',
+        reason: error instanceof Error ? error.message : String(error),
+      }
     }
   }
 
