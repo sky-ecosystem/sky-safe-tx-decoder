@@ -53,9 +53,9 @@ pnpm install
 pnpm --filter @shield3/sky-safe-ui dev
 ```
 
-#### Check before proposing
+#### Paste a transaction
 
-Proposer mode checks a transaction before it is in the Safe Transaction Service queue. Open the Safe and select **Check before proposing**.
+The Paste a transaction page checks a transaction before it is in the Safe Transaction Service queue. Open the Safe and select **Paste a transaction**.
 
 - Paste the JSON tab of the pending transaction from the Safe web app, or enter the fields. The Data tab shortens some values. A shortened value is rejected.
 - The nonce starts at the one the Safe web app proposes. A nonce that is already used or already queued shows a warning.

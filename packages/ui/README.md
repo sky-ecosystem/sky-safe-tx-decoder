@@ -69,7 +69,7 @@ http://localhost:5173/#/safe/ethereum/0xfeEDfaCeFeEdFaceFEedFACefEEDFaCEfEeDfAce
 | 13 | `lifecycle-delegate-proposal` | A proposal submitted by a delegate: the delegate is the proposer, the delegator owner is on a `delegate of` line |
 | 14 | `lifecycle-delegate-no-owner` | The same, but the service recorded no owner: the delegate is still disclosed on a `proposed by a delegate` line |
 
-Proposer mode works on the sentinel Safe too:
+The Paste a transaction page works on the sentinel Safe too:
 
 ```
 http://localhost:5173/#/safe/ethereum/0xfeEDfaCeFeEdFaceFEedFACefEEDFaCEfEeDfAce/propose

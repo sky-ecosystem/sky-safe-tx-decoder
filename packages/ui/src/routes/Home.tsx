@@ -195,7 +195,7 @@ export default function Home() {
           using EIP-712, allowing you to verify what you see on your hardware wallet.
         </p>
         <p className="text-gray-600 mb-4">
-          To check a transaction before you propose it, open the Safe and select Check before proposing.
+          To check a transaction before you propose it, open the Safe and select Paste a transaction.
         </p>
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
           <p className="text-sm text-yellow-800">

@@ -349,7 +349,7 @@ export default function ProposeTransaction() {
           >
             ← Back to List
           </button>
-          <h2 className="text-2xl font-bold">Check before proposing</h2>
+          <h2 className="text-2xl font-bold">Paste a transaction</h2>
         </div>
         <div className="text-sm text-gray-600 space-y-1">
           <p>
