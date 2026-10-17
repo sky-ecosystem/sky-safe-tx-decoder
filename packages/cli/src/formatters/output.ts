@@ -13,7 +13,7 @@ import type {
   DecodeVerificationStatus,
   NestedSafeHashResult,
 } from '@shield3/sky-safe-core';
-import { getAddressTag, isApiFallbackSentinel } from '@shield3/sky-safe-core';
+import { findForwardedCalls, getAddressTag, isApiFallbackSentinel } from '@shield3/sky-safe-core';
 import type { Address } from 'viem';
 
 /**
@@ -26,6 +26,29 @@ function verificationBadge(verification: { verified: boolean; status?: DecodeVer
   if (verification.verified) return chalk.green('✓ Verified');
   if (verification.status === 'unverifiable') return chalk.dim('- Not verified');
   return chalk.red('⚠ Mismatch');
+}
+
+/**
+ * Print the calls a one-layer decoding forwards and does not decode.
+ *
+ * A Safe API decoding of a forwarder such as `call(address target, bytes data)`
+ * is correct for the outer call and says nothing about `data`, which is what
+ * executes. This prints the same "Not decoded" state an undecodable call gets,
+ * with the target, selector and complete calldata. See forwarded-calls.ts.
+ */
+function printForwardedCalls(parameters: SafeApiDataDecoded['parameters'], indent: string): void {
+  for (const call of findForwardedCalls(parameters)) {
+    const where = call.index === null ? call.param : `${call.param}[${call.index}]`;
+    console.log(
+      chalk.yellow(
+        `\n${indent}⚠️  Not decoded: the call in ${where}. This decoding covers the outer call only. ` +
+          `Verify the forwarded calldata independently before signing.`
+      )
+    );
+    console.log(`${indent}Forwarded to: ${chalk.cyan(call.target ?? 'not determined from the decoding')}`);
+    console.log(`${indent}Function selector: ${chalk.cyan(call.selector)}`);
+    console.log(`${indent}Calldata: ${chalk.dim(call.calldata)}`);
+  }
 }
 
 /**
@@ -89,7 +112,11 @@ export function printTransactionData(tx: SafeApiMultisigTransaction): void {
  */
 export function printDecodedData(
   tx: SafeApiMultisigTransaction,
-  verification?: { verified: boolean; status?: DecodeVerificationStatus; error?: string } | null
+  verification?: { verified: boolean; status?: DecodeVerificationStatus; error?: string } | null,
+  options: {
+    /** A custom decoder decoded this call, including anything it forwards. */
+    customDecoded?: boolean;
+  } = {}
 ): void {
   // The Safe "fallback" sentinel means the service could not decode the call —
   // handle it like no decoded data (show the selector / raw), not a real method.
@@ -148,6 +175,7 @@ export function printDecodedData(
     for (const param of tx.dataDecoded.parameters) {
       console.log(`  ${chalk.dim(param.name)} (${chalk.dim(param.type)}): ${chalk.cyan(param.value)}`);
     }
+    if (!options.customDecoded) printForwardedCalls(tx.dataDecoded.parameters, '  ');
   } else {
     printField('Parameters', '[]');
   }
@@ -211,6 +239,7 @@ export function printNestedTransactionData(
       for (const param of apiDecoded.parameters) {
         console.log(`    ${chalk.dim(param.name)} (${chalk.dim(param.type)}): ${chalk.cyan(param.value)}`);
       }
+      printForwardedCalls(apiDecoded.parameters, '  ');
     } else {
       console.log('  Parameters: []');
     }
@@ -417,10 +446,28 @@ export function printNestedSafeHashes(
  * Print security analysis warnings
  * Reference: bash script lines 789-853 (security checks)
  */
-export function printSecurityWarnings(analysis: SecurityAnalysisResult): void {
-  // Overall risk header
+export function printSecurityWarnings(
+  analysis: SecurityAnalysisResult,
+  options: {
+    /** Some call in this transaction is not decoded, or decoded as high risk. */
+    undecoded?: boolean;
+  } = {}
+): void {
+  // Overall risk header. The checks behind it read the transaction's structure
+  // (delegate call, gas token, owners, modules, guards, address book), never
+  // its decoded calls, so their all-clear is not printed under a call that
+  // nothing decoded.
   if (analysis.overallRisk === 'none') {
-    console.log(chalk.green('\n✓ No security risks detected'));
+    if (options.undecoded) {
+      console.log(
+        chalk.yellow(
+          '\n⚠️  Not every call in this transaction is decoded (see above). The security checks ' +
+            'found nothing, and they do not read decoded calls.'
+        )
+      );
+    } else {
+      console.log(chalk.green('\n✓ No security risks detected'));
+    }
     return;
   }
 

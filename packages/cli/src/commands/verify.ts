@@ -31,7 +31,8 @@ import {
   verifyDecodedData,
   isApiFallbackSentinel,
 } from '@shield3/sky-safe-core';
-import type { SafeApiMultisigTransaction } from '@shield3/sky-safe-core';
+import { isCallFullyDecoded } from '@shield3/sky-safe-core';
+import type { DecodedTransactionData, SafeApiDataDecoded, SafeApiMultisigTransaction } from '@shield3/sky-safe-core';
 import type { Address, Hex } from 'viem';
 import {
   printNetworkConfig,
@@ -240,7 +241,28 @@ export function createVerifyCommand(): Command {
           apiDecodedVerification = verifyDecodedData(tx.data as Hex, tx.dataDecoded);
         }
 
-        printDecodedData(tx, apiDecodedVerification);
+        // A custom decoder that decodes this call also decodes what it forwards,
+        // so the Safe API decoding's "not decoded" notice would be wrong there.
+        const customDecodesTop =
+          !!tx.data &&
+          tx.data !== '0x' &&
+          !isMultiSend(tx.data as Hex) &&
+          decoderRegistry.decode(tx.to, tx.data as Hex, options.network) !== undefined;
+
+        printDecodedData(tx, apiDecodedVerification, { customDecoded: customDecodesTop });
+
+        // Any call this run could not fully decode. The security checks below
+        // never read decodings, so without this their all-clear would print
+        // under a call nothing decoded.
+        let undecoded = false;
+        const notFullyDecoded = (
+          data: string | null | undefined,
+          custom: DecodedTransactionData | null | undefined,
+          api: SafeApiDataDecoded | null | undefined
+        ): boolean => {
+          const usable = api && !isApiFallbackSentinel(api) ? api : null;
+          return !isCallFullyDecoded({ data, custom, decoded: !!usable, parameters: usable?.parameters });
+        };
 
         // Try custom decoder if available OR decode MultiSend
         if (tx.data && tx.data !== '0x') {
@@ -302,6 +324,8 @@ export function createVerifyCommand(): Command {
                   verification = verifyDecodedData(nestedTx.data, apiDecoded);
                 }
 
+                if (notFullyDecoded(nestedTx.data, customDecoded, apiDecoded)) undecoded = true;
+
                 // Print using the new formatter
                 printNestedTransactionData(
                   i,
@@ -319,6 +343,7 @@ export function createVerifyCommand(): Command {
           } else {
             // Try direct custom decoder
             const customDecoded = decoderRegistry.decode(tx.to, tx.data, options.network);
+            if (notFullyDecoded(tx.data, customDecoded, tx.dataDecoded)) undecoded = true;
             if (customDecoded) {
               printCustomDecodedData(customDecoded);
             } else if (decoderRegistry.hasDecoder(tx.to, options.network)) {
@@ -346,7 +371,7 @@ export function createVerifyCommand(): Command {
         };
 
         const securityAnalysis = analyzeSecurity(txData);
-        printSecurityWarnings(securityAnalysis);
+        printSecurityWarnings(securityAnalysis, { undecoded });
 
         // Calculate Safe transaction hash
         console.log(chalk.bold('\n========================================'));
