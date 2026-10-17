@@ -732,6 +732,43 @@ describe('AdministeredAgent.call', () => {
     expect(decoded.main.warnings!.join('\n')).toContain('0xdeadbeef');
   });
 
+  it('never reports a call it cannot name as anything below high risk', () => {
+    // Every way the inner Controller call can be unrecognised: a selector that
+    // is on no frozen table at all, a real selector of the OTHER Controller,
+    // a target with no frozen table, and calldata with no selector. Each must
+    // reach the same high-risk state, with its warning lifted onto the outer
+    // call, which is the list the UI renders.
+    const cases: Array<{ target: Address; data: Hex; name: string; mustMention: string }> = [
+      { target: SECOND_CONTROLLER, data: '0xdeadbeef', name: 'unknown call selector', mustMention: '0xdeadbeef' },
+      // 0xe4696d83 is Grove's BasinFacet.deposit. It is not wired on the second Controller.
+      {
+        target: SECOND_CONTROLLER,
+        data: '0xe4696d830000000000000000000000000000000000000000000000000000000000000001',
+        name: 'unknown call selector',
+        mustMention: '0xe4696d83',
+      },
+      {
+        target: '0x0DD65461610Fe5b65cE50A870B10ED0F3d24d8C2',
+        data: REAL.withdraw,
+        name: 'unknown Controller',
+        mustMention: '0x0DD65461610Fe5b65cE50A870B10ED0F3d24d8C2',
+      },
+      { target: SECOND_CONTROLLER, data: '0x', name: 'call with no selector', mustMention: SECOND_CONTROLLER },
+    ];
+    for (const { target, data, name, mustMention } of cases) {
+      const encoded = encodeFunctionData({ abi: CALL_ABI, functionName: 'call', args: [target, data] });
+      expect(second.canDecode(SECOND_AGENT, encoded)).toBe(true);
+      const decoded = second.decode(encoded);
+      const inner = decoded.nested![0]!;
+      expect(inner.name).toBe(name);
+      expect(inner.riskLevel).toBe('high');
+      expect(inner.parameters).toEqual([]);
+      expect(inner.rawCalldata).toBe(data);
+      expect(decoded.main.riskLevel).toBe('high');
+      expect(decoded.main.warnings!.join('\n')).toContain(mustMention);
+    }
+  });
+
   it('reports trailing calldata on call rather than decoding around it', () => {
     const decoded = second.decode((REAL_NONCE_23 + 'deadbeef') as Hex);
     expect(decoded.main.warnings!.join('\n')).toMatch(/Extra|trailing/i);
