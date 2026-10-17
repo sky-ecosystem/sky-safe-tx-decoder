@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **The PAU decoder covers the PSM and ERC-4626 facets on Controller `0x24169Afb34fAe4D4356BC54Bd80319131e35ca38`.** The dispatch table is regenerated at block 26207731. It adds 20 call selectors from two integrations wired at block 26176894: `PSM_FACET` on PSMFacet `0xE4A5dAc768a310cc2316f258901b32E499653064` and `ERC4626_FACET` on ERC4626Facet `0x1dCA18608c89174181153E786778705b4A0E1a06`. No existing entry changed. This resolves the drift reported in issue #12.
+  - `swapUSDSToUSDC` and `swapUSDCToUSDS` scale `usdcAmount` as USDC. A note on `swapUSDSToUSDC` states that the amount is the USDC received, not the USDS spent.
+  - ERC-4626 `deposit`, `withdraw` and `redeem` state that parameter 0 is the vault, not the asset. Share amounts scale by the vault's decimals when the vault is in the token registry. Asset amounts stay unscaled, because the facet reads the asset from the vault at execution.
+  - `setMaxExchangeRate` states the value it stores, `1e36 * maxExpectedAssets / shares`, in full. A `maxExpectedAssets` of 0 carries a warning: it blocks deposits into the vault and does not remove the cap.
+  - The home page PAU card lists the ERC4626Facet and names the Controller each facet is wired on.
+
+### Fixed
+
+- **A PAU call sent through `AdministeredAgent.call` showed the Controller call as opaque bytes, with no risk reported.** The decoder handled `batchCall` (`0x4e120423`) only. Safe `0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26` sends 7 of its 27 transactions through `call(address,bytes)` (`0x1b8b921d`): nonces 2, 3, 4 and 22 to 25, including every transaction that reaches the new facets. The tool used the Safe API's decoding of the outer `call`, which re-encodes exactly, and left the inner call undecoded. The CLI printed "No security risks detected" and the web UI showed no warning. `call` now decodes as a batch of one. A selector the frozen table does not hold, a Controller it has no table for, or a call with no selector renders as undecodable and high risk, as in a `batchCall`. The web UI checks the call selector against the chain like a `batchCall` entry.
+- **A forwarded call that nothing decodes rendered as a verified decoding.** The "Not decoded" state fired only when no decoding existed at all. A Safe API or Sourcify decoding of a forwarder such as `call(address target, bytes data)` is correct for the outer call, so the forwarded calldata in `data` went unflagged. The same gap remains for any forwarder no custom decoder covers, for example an AdministeredAgent with the same bytecode at an unregistered address. A `bytes` or `bytes[]` value shaped like calldata in a function that takes an address now gets the amber "Not decoded" state, with the target, selector and complete calldata. This applies in the CLI and the web UI, at top level and in each MultiSend entry. It is skipped where a custom decoder decoded the call.
+- **The CLI printed "No security risks detected" under a call it had not decoded.** The security checks read the transaction's structure, not its decoded calls. When any call is not decoded, forwards undecoded calldata, or is rated high risk by a custom decoder, the CLI now prints that not every call is decoded instead of the all-clear. The web UI prints no all-clear line, so it is unchanged.
+
 ## [0.5.0] — 2026-10-05
 
 A remote address book served from the tool's own origin, address book warnings that update whenever a label changes, and dependency upgrades that close the open Dependabot advisories.
