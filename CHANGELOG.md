@@ -25,6 +25,7 @@ All notable changes to this project are documented here.
   - a Safe API decoding fails the re-encode check, including the outer MultiSend decoding;
   - a call with no custom decoder has a Safe API decoding that could not be checked or has trailing data;
   - the calldata does not parse as a MultiSend batch.
+- **The CLI printed the warning sign twice on decoder warnings that already start with it.**
 
 ## [0.5.0] — 2026-10-05
 

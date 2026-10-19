@@ -316,7 +316,9 @@ function printDecodedFunction(func: DecodedFunction, index: number): void {
   // Print function-specific warnings
   if (func.warnings && func.warnings.length > 0) {
     for (const warning of func.warnings) {
-      console.log(`${prefix}${chalk.yellow(`⚠️  ${warning}`)}`);
+      // Decoders often start a warning with the emoji already. Do not print it twice.
+      const marked = warning.startsWith('⚠️') ? warning : `⚠️  ${warning}`;
+      console.log(`${prefix}${chalk.yellow(marked)}`);
     }
   }
 
