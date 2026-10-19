@@ -329,7 +329,7 @@ function ForwardedCallNotice({
       {calls.map((call, i) => (
         <div key={i} className="bg-amber-50 rounded p-3 border-2 border-amber-400">
           <p className="font-semibold text-amber-900 mb-1">
-            Not decoded: the call in {call.index === null ? call.param : `${call.param}[${call.index}]`}
+            Not decoded: the call in {call.path}
           </p>
           <p className="text-xs text-amber-800 mb-3">
             This decoding covers the outer call only. Verify the forwarded calldata independently before signing.

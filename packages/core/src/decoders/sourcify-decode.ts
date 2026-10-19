@@ -9,7 +9,7 @@
  * is ever presented as decoded unless `verified` is true.
  */
 
-import type { Abi, AbiFunction, Address, Hex } from 'viem';
+import type { Abi, AbiFunction, AbiParameter, Address, Hex } from 'viem';
 import { decodeFunctionData, encodeFunctionData, toFunctionSelector, toFunctionSignature } from 'viem';
 import { fetchAbiFromSourcify, requestEtherscanImport } from '../api/sourcify-client.js';
 import { resolveProxyImplementation } from '../api/proxy.js';
@@ -60,6 +60,11 @@ export interface SourcifyDecodedParam {
   type: string;
   /** Display value; arrays/tuples are kept structured for the renderer. */
   value: unknown;
+  /**
+   * The ABI components of a tuple or tuple-array parameter. Kept so that
+   * findForwardedCalls can walk the tuple by type rather than guess.
+   */
+  components?: readonly AbiParameter[];
 }
 
 export interface SourcifyDecodeResult {
@@ -136,6 +141,7 @@ export function decodeWithAbi(abi: Abi, data: Hex): SourcifyDecodeResult | null 
     name: input.name || `arg${i}`,
     type: input.type,
     value: args[i],
+    ...('components' in input && input.components ? { components: input.components } : {}),
   }));
 
   // `reencoded === '0x'` is the re-encode-failed sentinel above. classifyReencode

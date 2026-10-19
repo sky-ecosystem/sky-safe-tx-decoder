@@ -38,10 +38,9 @@ function verificationBadge(verification: { verified: boolean; status?: DecodeVer
  */
 function printForwardedCalls(parameters: SafeApiDataDecoded['parameters'], indent: string): void {
   for (const call of findForwardedCalls(parameters)) {
-    const where = call.index === null ? call.param : `${call.param}[${call.index}]`;
     console.log(
       chalk.yellow(
-        `\n${indent}⚠️  Not decoded: the call in ${where}. This decoding covers the outer call only. ` +
+        `\n${indent}⚠️  Not decoded: the call in ${call.path}. This decoding covers the outer call only. ` +
           `Verify the forwarded calldata independently before signing.`
       )
     );
