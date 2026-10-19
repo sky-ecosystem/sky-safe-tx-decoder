@@ -34,6 +34,10 @@ const FORWARD_PLUS_ONE_PARAMS = [
   { name: 'target', type: 'address', value: USDC },
   { name: 'data', type: 'bytes', value: TRANSFER_PLUS_ONE },
 ];
+const TRANSFER_PARAMS = [
+  { name: 'to', type: 'address', value: '0x000000000000000000000000000000000000dEaD' },
+  { name: 'value', type: 'uint256', value: '1000000000000' },
+];
 
 describe('findForwardedCalls', () => {
   it('finds the Controller call inside the Safe API decoding of AdministeredAgent.call', () => {
@@ -238,6 +242,51 @@ describe('isCallFullyDecoded', () => {
     expect(
       isCallFullyDecoded({ data, decoded: true, parameters: [{ name: 'data', type: 'bytes[]', value: [TRANSFER] }] })
     ).toBe(false);
+  });
+
+  it('is false when a custom decoder rates the main call none and a nested call high', () => {
+    // LockstakeEngine multicall rates the outer call 'none' and an unknown
+    // nested selector 'high'.
+    expect(
+      isCallFullyDecoded({
+        data,
+        decoded: true,
+        custom: { main: { riskLevel: 'none' }, nested: [{ riskLevel: 'medium' }, { riskLevel: 'high' }] },
+      })
+    ).toBe(false);
+  });
+
+  it('is true when every nested call of a custom decoding is below high risk', () => {
+    expect(
+      isCallFullyDecoded({
+        data,
+        decoded: true,
+        custom: { main: { riskLevel: 'none' }, nested: [{ riskLevel: 'medium' }, { riskLevel: 'low' }] },
+      })
+    ).toBe(true);
+  });
+
+  it('is false when the one-layer decoding does not re-encode to the calldata', () => {
+    for (const status of ['mismatch', 'unverifiable', 'trailing-data']) {
+      expect(
+        isCallFullyDecoded({ data: TRANSFER, decoded: true, parameters: TRANSFER_PARAMS, verification: { status } })
+      ).toBe(false);
+    }
+    expect(
+      isCallFullyDecoded({ data: TRANSFER, decoded: true, parameters: TRANSFER_PARAMS, verification: { status: 'verified' } })
+    ).toBe(true);
+  });
+
+  it('is false when the Safe API decoding mismatches, even where a custom decoder decoded the call', () => {
+    expect(
+      isCallFullyDecoded({ data, decoded: true, custom: { main: { riskLevel: 'medium' } }, verification: { status: 'mismatch' } })
+    ).toBe(false);
+  });
+
+  it('is true for a custom decoding when the Safe API decoding could not be checked', () => {
+    expect(
+      isCallFullyDecoded({ data, decoded: true, custom: { main: { riskLevel: 'medium' } }, verification: { status: 'unverifiable' } })
+    ).toBe(true);
   });
 
   it('is true for a call with no calldata and for a one-layer decoding that forwards nothing', () => {

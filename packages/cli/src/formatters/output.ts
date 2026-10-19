@@ -448,7 +448,7 @@ export function printNestedSafeHashes(
 export function printSecurityWarnings(
   analysis: SecurityAnalysisResult,
   options: {
-    /** Some call in this transaction is not decoded, or decoded as high risk. */
+    /** Some call in this transaction is not decoded, decoded as high risk, or failed its re-encode check. */
     undecoded?: boolean;
   } = {}
 ): void {
@@ -460,7 +460,7 @@ export function printSecurityWarnings(
     if (options.undecoded) {
       console.log(
         chalk.yellow(
-          '\n⚠️  Not every call in this transaction is decoded (see above). The security checks ' +
+          '\n⚠️  Not every call in this transaction is decoded and verified (see above). The security checks ' +
             'found nothing, and they do not read decoded calls.'
         )
       );

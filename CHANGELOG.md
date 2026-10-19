@@ -19,7 +19,12 @@ All notable changes to this project are documented here.
   - A `bytes` value of 4 bytes or more counts in a function that takes an address. A `bytes[]` element of 4 bytes or more counts in any function, which covers a self-multicall `multicall(bytes[])`.
   - There is no word-alignment rule. Solidity ignores calldata past the arguments it reads, so a call with one byte appended still executes. A 65-byte value is not exempt either, because a one-argument call padded to 65 bytes executes. A function such as `permit` with a `bytes signature` therefore gets the notice.
   - Values inside tuples and tuple arrays count, which covers Multicall3 `aggregate((address,bytes)[])`. Sourcify decodings keep tuple components for this.
-- **The CLI printed "No security risks detected" under a call it had not decoded.** The security checks read the transaction's structure, not its decoded calls. When any call is not decoded, forwards undecoded calldata, or is rated high risk by a custom decoder, the CLI now prints that not every call is decoded instead of the all-clear. The web UI prints no all-clear line, so it is unchanged.
+- **The CLI printed "No security risks detected" under a call it had not decoded.** The security checks read the transaction's structure, not its decoded calls. The web UI prints no all-clear line, so it is unchanged. The CLI now prints that not every call is decoded and verified instead of the all-clear when any of these holds:
+  - a call is not decoded, or forwards undecoded calldata;
+  - a custom decoder rates the call or any of its nested calls high risk, as LockstakeEngine `multicall` does for an unknown nested selector;
+  - a Safe API decoding fails the re-encode check, including the outer MultiSend decoding;
+  - a call with no custom decoder has a Safe API decoding that could not be checked or has trailing data;
+  - the calldata does not parse as a MultiSend batch.
 
 ## [0.5.0] — 2026-10-05
 

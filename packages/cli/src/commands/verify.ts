@@ -32,7 +32,12 @@ import {
   isApiFallbackSentinel,
 } from '@shield3/sky-safe-core';
 import { isCallFullyDecoded } from '@shield3/sky-safe-core';
-import type { DecodedTransactionData, SafeApiDataDecoded, SafeApiMultisigTransaction } from '@shield3/sky-safe-core';
+import type {
+  DecodedTransactionData,
+  DecodeVerificationResult,
+  SafeApiDataDecoded,
+  SafeApiMultisigTransaction,
+} from '@shield3/sky-safe-core';
 import type { Address, Hex } from 'viem';
 import {
   printNetworkConfig,
@@ -258,10 +263,17 @@ export function createVerifyCommand(): Command {
         const notFullyDecoded = (
           data: string | null | undefined,
           custom: DecodedTransactionData | null | undefined,
-          api: SafeApiDataDecoded | null | undefined
+          api: SafeApiDataDecoded | null | undefined,
+          verification: DecodeVerificationResult | null
         ): boolean => {
           const usable = api && !isApiFallbackSentinel(api) ? api : null;
-          return !isCallFullyDecoded({ data, custom, decoded: !!usable, parameters: usable?.parameters });
+          return !isCallFullyDecoded({
+            data,
+            custom,
+            decoded: !!usable,
+            parameters: usable?.parameters,
+            verification,
+          });
         };
 
         // Try custom decoder if available OR decode MultiSend
@@ -282,6 +294,10 @@ export function createVerifyCommand(): Command {
                 console.log(chalk.dim('\n- MultiSend outer transaction not verified'));
                 console.log(chalk.dim(`  Could not run the re-encode check: ${multiSendVerification.error}`));
               } else {
+                // The service served a decoding of different bytes. The nested
+                // calls below are read from the raw bytes, but a mismatch is a
+                // stop signal, so the all-clear must not print under it.
+                undecoded = true;
                 console.log(chalk.red('\n⚠ MultiSend outer transaction verification failed'));
                 if (multiSendVerification.error) {
                   console.log(chalk.red(`  ${multiSendVerification.error}`));
@@ -290,6 +306,8 @@ export function createVerifyCommand(): Command {
             }
 
             const nestedTxs = decodeMultiSend(tx.data as Hex);
+            // Bytes that do not parse as a MultiSend batch are not decoded.
+            if (!nestedTxs) undecoded = true;
 
             // Get Safe API decoded nested transactions from valueDecoded
             let apiNestedTxs = null;
@@ -324,7 +342,7 @@ export function createVerifyCommand(): Command {
                   verification = verifyDecodedData(nestedTx.data, apiDecoded);
                 }
 
-                if (notFullyDecoded(nestedTx.data, customDecoded, apiDecoded)) undecoded = true;
+                if (notFullyDecoded(nestedTx.data, customDecoded, apiDecoded, verification)) undecoded = true;
 
                 // Print using the new formatter
                 printNestedTransactionData(
@@ -343,7 +361,7 @@ export function createVerifyCommand(): Command {
           } else {
             // Try direct custom decoder
             const customDecoded = decoderRegistry.decode(tx.to, tx.data, options.network);
-            if (notFullyDecoded(tx.data, customDecoded, tx.dataDecoded)) undecoded = true;
+            if (notFullyDecoded(tx.data, customDecoded, tx.dataDecoded, apiDecodedVerification)) undecoded = true;
             if (customDecoded) {
               printCustomDecodedData(customDecoded);
             } else if (decoderRegistry.hasDecoder(tx.to, options.network)) {

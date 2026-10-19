@@ -335,9 +335,15 @@ export function findForwardedCalls(parameters: readonly DecodedParam[] | null | 
  *
  * False when the call carries calldata and any of these holds:
  *
- * - a custom decoder decoded it but rated it high risk, which is how a decoder
- *   reports a call it cannot name;
+ * - the Safe API decoding failed the re-encode check (`mismatch`). The service
+ *   served a decoding of different bytes, so this holds even where a custom
+ *   decoder decoded the call;
+ * - a custom decoder decoded it but rated the main call or any nested call
+ *   high risk, which is how a decoder reports a call it cannot name;
  * - no custom decoder decoded it and no usable one-layer decoding exists;
+ * - no custom decoder decoded it and the one-layer decoding did not re-encode
+ *   exactly (`trailing-data` or `unverifiable`). The decoding then does not
+ *   provably describe the bytes;
  * - the one-layer decoding forwards calldata that nothing decoded.
  *
  * The security checks read the transaction's structure, never its decodings.
@@ -347,14 +353,21 @@ export function findForwardedCalls(parameters: readonly DecodedParam[] | null | 
 export function isCallFullyDecoded(call: {
   data: string | null | undefined
   /** The custom decoder's result, when one decoded the call. */
-  custom?: { main: { riskLevel?: string } } | null
+  custom?: { main: { riskLevel?: string }; nested?: ReadonlyArray<{ riskLevel?: string }> } | null
   /** The one-layer decoding's parameters (Safe API or Sourcify), when one exists. */
   parameters?: readonly DecodedParam[] | null
   /** True when a one-layer decoding exists. */
   decoded: boolean
+  /** The re-encode check of the one-layer decoding, when the caller ran it. */
+  verification?: { status?: string } | null
 }): boolean {
   if (!call.data || call.data === '0x') return true
-  if (call.custom) return call.custom.main.riskLevel !== 'high'
+  if (call.verification?.status === 'mismatch') return false
+  if (call.custom) {
+    if (call.custom.main.riskLevel === 'high') return false
+    return !(call.custom.nested ?? []).some(n => n.riskLevel === 'high')
+  }
   if (!call.decoded) return false
+  if (call.verification && call.verification.status !== 'verified') return false
   return findForwardedCalls(call.parameters).length === 0
 }
