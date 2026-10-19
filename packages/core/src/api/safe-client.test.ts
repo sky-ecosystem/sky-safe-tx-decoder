@@ -72,6 +72,8 @@ describe('decodeData', () => {
   });
 
   it("returns the service's fallback sentinel unchanged, as a decoding", async () => {
+    // The live service answers this for an unknown selector only when the
+    // target's ABI has a fallback function.
     stubFetch([{ status: 200, body: { method: 'fallback', parameters: [] } }]);
     expect(await new SafeApiClient('ethereum').decodeData('0xdeadbeef', USDC)).toEqual({
       status: 'decoded',
@@ -86,8 +88,19 @@ describe('decodeData', () => {
     }
   });
 
-  it('fails on a non-2xx answer, naming the status', async () => {
-    for (const status of [400, 404, 422, 500, 503]) {
+  it('answers none for 404, the answer for a selector the service does not know', async () => {
+    // Checked against the live service: 0xdeadbeef to
+    // 0x24169Afb34fAe4D4356BC54Bd80319131e35ca38 answers 404 with an empty body.
+    stubFetch([{ status: 404, raw: '' }]);
+    expect(
+      await new SafeApiClient('ethereum').decodeData('0xdeadbeef', '0x24169Afb34fAe4D4356BC54Bd80319131e35ca38')
+    ).toEqual({ status: 'none' });
+    stubFetch([{ status: 404, body: { detail: 'Not found.' } }]);
+    expect(await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC)).toEqual({ status: 'none' });
+  });
+
+  it('fails on any other non-2xx answer, naming the status', async () => {
+    for (const status of [400, 403, 422, 500, 503]) {
       stubFetch([{ status, body: { detail: 'x' } }]);
       expect(await new SafeApiClient('ethereum').decodeData(TRANSFER_DATA, USDC)).toEqual({
         status: 'failed',

@@ -344,18 +344,19 @@ export class SafeApiClient {
    * including `valueDecoded` for a MultiSend. Checked against the live
    * service: for an existing transaction it returns that record's
    * `dataDecoded` exactly. For a selector it does not know, the service
-   * answers 200 with its `fallback` sentinel. That comes back as `decoded`,
-   * unchanged, so callers handle it with `isApiFallbackSentinel` as they do
-   * for a record.
+   * answers 404 with an empty body, which comes back as `none`. When the
+   * target's ABI has a fallback function, it answers 200 with its `fallback`
+   * sentinel instead. That comes back as `decoded`, unchanged, so callers
+   * handle it with `isApiFallbackSentinel` as they do for a record.
    *
    * The result keeps two outcomes apart that a caller must not merge:
    *
    * - `none`: the service has no decoding to give. Empty calldata (no
-   *   request is sent, since the service rejects `0x` with 422), or a 2xx
-   *   answer with an empty or `null` body.
-   * - `failed`: the service did not answer usefully. A non-2xx status, rate
-   *   limiting that outlasts the retries, a network failure, or a body that
-   *   is not a decoding. Nothing is known about the call.
+   *   request is sent, since the service rejects `0x` with 422), a 404, or
+   *   a 2xx answer with an empty or `null` body.
+   * - `failed`: the service did not answer usefully. Any other non-2xx
+   *   status, rate limiting that outlasts the retries, a network failure, or
+   *   a body that is not a decoding. Nothing is known about the call.
    *
    * @param data - Calldata to decode
    * @param to - Call target. The service uses it to pick a contract's ABI.
@@ -375,6 +376,8 @@ export class SafeApiClient {
         if (response.status === 429) {
           throw new SafeApiError('Safe API rate limit', 429)
         }
+        // The service's answer for a selector it has no ABI for.
+        if (response.status === 404) return { status: 'none' }
         if (!response.ok) {
           return { status: 'failed', reason: `HTTP ${response.status}` }
         }
