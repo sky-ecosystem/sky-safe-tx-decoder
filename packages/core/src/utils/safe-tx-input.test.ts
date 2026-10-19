@@ -38,6 +38,20 @@ const NONCE_520_JSON = JSON.stringify({
   nonce: 520,
 });
 
+/** Executed nonce 24 of test Safe 0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26 on Ethereum, in the JSON tab's layout. */
+const NONCE_24_JSON_TAB = `{
+  "to": "0x1837505D104F7a6D8b7e19452610B0A3D652EF12",
+  "value": "0",
+  "data": "0x1b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca3800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000064e7accdce000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db2000000000000000000000000000000000000000000007ea954dee7dfbfcc32240000000000000000000000000000000000000000000000000000008b92d193c500000000000000000000000000000000000000000000000000000000",
+  "operation": 0,
+  "baseGas": "0",
+  "gasPrice": "0",
+  "gasToken": "0x0000000000000000000000000000000000000000",
+  "refundReceiver": "0x0000000000000000000000000000000000000000",
+  "nonce": 24,
+  "safeTxGas": "0"
+}`;
+
 function validValues(overrides: Partial<SafeTxFieldValues> = {}): SafeTxFieldValues {
   return {
     ...defaultSafeTxFieldValues(),
@@ -81,6 +95,26 @@ describe('parseSafeTxJson', () => {
     expect(hashes.safeTxHash).toBe('0x3afdbbdfca4f869f5918b012b771f7cd6aa2dc63c80bf63169dc82502663e3b5');
   });
 
+  it('reproduces all three hashes of executed nonce 24 of Safe 0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26', () => {
+    const result = parseSafeTxJson(NONCE_24_JSON_TAB);
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    const hashes = calculateSafeTxHash(1, '0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26', result.transaction, '1.3.0');
+    expect(hashes).toEqual({
+      domainHash: '0xa56b14e9eb212bf7806cae73036c4b9a69074b9c85a89559903124d4ebf4a4c0',
+      messageHash: '0x9425dfff62db0bc6483df249c93e8c6498970aee929ffe79d4019a1019d094c2',
+      safeTxHash: '0xb361e998b3b5c25c2c536f83ad558efdb2d24e1209a50b06d26c0a5e4aba4fda',
+    });
+  });
+
+  it('rejects the nonce 24 paste with its nonce line removed', () => {
+    const text = NONCE_24_JSON_TAB.replace('  "nonce": 24,\n', '');
+    expect(text).not.toContain('nonce');
+    expect(parseSafeTxJson(text)).toEqual({
+      ok: false,
+      errors: [{ field: 'nonce', message: 'Missing key "nonce". Copy the whole transaction from the JSON tab.' }],
+    });
+  });
+
   it('accepts numbers as JSON numbers or as decimal strings, with the same result', () => {
     const asNumbers = parseSafeTxJson(
       JSON.stringify({ ...JSON.parse(SAFE_JSON_TAB), value: 10000000000000, baseGas: 0, operation: 0, nonce: 10 })
@@ -98,7 +132,7 @@ describe('parseSafeTxJson', () => {
     expect(asNumbers).toEqual(asStrings);
   });
 
-  it('fills omitted gas fields, gas token and refund receiver with their defaults', () => {
+  it('rejects a paste that omits the gas fields, gas token and refund receiver, and names each key', () => {
     const result = parseSafeTxJson(
       JSON.stringify({
         to: '0xA79C6968E3c75aE4eF388370d1f142720D498fEC',
@@ -108,20 +142,25 @@ describe('parseSafeTxJson', () => {
         nonce: 3,
       })
     );
-    expect(result.ok && result.transaction).toMatchObject({
-      safeTxGas: '0',
-      baseGas: '0',
-      gasPrice: '0',
-      gasToken: '0x0000000000000000000000000000000000000000',
-      refundReceiver: '0x0000000000000000000000000000000000000000',
+    expect(result).toEqual({
+      ok: false,
+      errors: [
+        {
+          field: null,
+          message:
+            'Missing keys "safeTxGas", "baseGas", "gasPrice", "gasToken", "refundReceiver". Copy the whole transaction from the JSON tab.',
+        },
+      ],
     });
   });
 
-  it('rejects a paste without a nonce when used on its own', () => {
-    const result = parseSafeTxJson(
-      JSON.stringify({ to: '0xA79C6968E3c75aE4eF388370d1f142720D498fEC', value: '1', data: '0x', operation: 0 })
-    );
-    expect(result).toEqual({ ok: false, errors: [{ field: 'nonce', message: 'nonce is required.' }] });
+  it('rejects a paste without a nonce, and does not fill one', () => {
+    const copy = JSON.parse(SAFE_JSON_TAB) as Record<string, unknown>;
+    delete copy.nonce;
+    expect(parseSafeTxJson(JSON.stringify(copy))).toEqual({
+      ok: false,
+      errors: [{ field: 'nonce', message: 'Missing key "nonce". Copy the whole transaction from the JSON tab.' }],
+    });
   });
 
   it('normalises an all-lower-case address to its checksum and data to lower case', () => {
@@ -141,9 +180,36 @@ describe('readSafeTxJson rejections', () => {
   const base = JSON.parse(SAFE_JSON_TAB) as Record<string, unknown>;
 
   it('rejects text that is not JSON', () => {
-    const result = readSafeTxJson('{ "to": ');
-    expect(result.ok).toBe(false);
-    expect(!result.ok && result.error.message).toMatch(/^Not valid JSON\./);
+    expect(readSafeTxJson('{ "to": ')).toEqual({
+      ok: false,
+      error: { field: null, message: 'Not valid JSON. The text ends before the JSON is complete.' },
+    });
+  });
+
+  it('reports where JSON is invalid without echoing any of the pasted text', () => {
+    // An unquoted address. The engine's own message quotes the first
+    // characters of the address, a truncated identifier, so it is not shown.
+    const cases: [string, string][] = [
+      ['to: 0x1837505D104F7a6D8b7e19452610B0A3D652EF12', 'Not valid JSON. Check line 1, column 1.'],
+      ['{ "to": 0x1837505D104F7a6D8b7e19452610B0A3D652EF12 }', 'Not valid JSON. Check line 1, column 10.'],
+      ['{\n  "to": "0x1837505D104F7a6D8b7e19452610B0A3D652EF12",\n  "value": 0x0\n}', 'Not valid JSON. Check line 3, column 13.'],
+      ['{\r\n  "to": "0x1837505D104F7a6D8b7e19452610B0A3D652EF12"\r\n  "value": "0"\r\n}', 'Not valid JSON. Check line 3, column 3.'],
+      ['{ "to": "0x1837505D104F7a6D8b7e19452610B0A3D652EF12", }', 'Not valid JSON. Check line 1, column 55.'],
+      ['{ "to": "0x18\u0001" }', 'Not valid JSON. Check line 1, column 14.'],
+      ['{} 0x1837505D104F7a6D8b7e19452610B0A3D652EF12', 'Not valid JSON. Check line 1, column 4.'],
+    ];
+    for (const [text, message] of cases) {
+      expect(() => JSON.parse(text)).toThrow();
+      const result = readSafeTxJson(text);
+      expect(result).toEqual({ ok: false, error: { field: null, message } });
+    }
+  });
+
+  it('reports invalid JSON without a position when the text nests too deep to scan', () => {
+    expect(readSafeTxJson('['.repeat(200_000))).toEqual({
+      ok: false,
+      error: { field: null, message: 'Not valid JSON.' },
+    });
   });
 
   it('rejects JSON that is not one object', () => {
@@ -182,13 +248,13 @@ describe('readSafeTxJson rejections', () => {
     expect(readSafeTxJson(text)).toEqual({ ok: false, error: { field: 'data', message: 'data must be a string.' } });
   });
 
-  it('rejects a missing required key', () => {
-    for (const key of ['to', 'value', 'data', 'operation']) {
+  it('rejects a paste that omits any one key, and names it', () => {
+    for (const key of SAFE_TX_FIELDS) {
       const copy = { ...base };
       delete copy[key];
       expect(readSafeTxJson(JSON.stringify(copy))).toEqual({
         ok: false,
-        error: { field: key, message: `Missing key "${key}".` },
+        error: { field: key, message: `Missing key "${key}". Copy the whole transaction from the JSON tab.` },
       });
     }
   });

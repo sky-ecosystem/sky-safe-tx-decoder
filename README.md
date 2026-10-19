@@ -57,8 +57,8 @@ pnpm --filter @shield3/sky-safe-ui dev
 
 The Paste a transaction page checks a transaction before it is in the Safe Transaction Service queue. Open the Safe and select **Paste a transaction**.
 
-- Paste the JSON tab of the pending transaction from the Safe web app, or enter the fields. The Data tab shortens some values. A shortened value is rejected.
-- The nonce starts at the one the Safe web app proposes. A nonce that is already used or already queued shows a warning.
+- Paste the JSON tab of the pending transaction from the Safe web app, or enter the fields. The Data tab shortens some values. A shortened value is rejected. A pasted JSON must contain all ten keys. A paste with a missing key is rejected.
+- In the fields, the nonce starts at the one the Safe web app proposes. A nonce that is already used or already queued shows a warning.
 - The decoding, security warnings and hashes are the ones signers see for the queued transaction. Compare the safeTxHash with the Hashes tab and your hardware wallet. If they differ, do not sign.
 - The Safe Transaction Service data decoder decodes the calldata. Nothing you enter is stored or put in the URL.
 - After you propose, **Find in queue** opens the queued transaction.

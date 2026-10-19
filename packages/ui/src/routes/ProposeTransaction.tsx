@@ -176,9 +176,9 @@ export default function ProposeTransaction() {
       return;
     }
     setJsonError(null);
-    // Keys the paste omits take their defaults, and the nonce the recommended
-    // one. A nonce in the paste wins.
-    setFields({ ...defaultSafeTxFieldValues(), nonce: recommendedText, ...read.values });
+    // A paste has every key, or readSafeTxJson rejects it. Nothing is filled
+    // in for a pasted transaction: not a default, not the recommended nonce.
+    setFields(read.values);
   };
 
   const onFieldChange = (field: SafeTxField, value: string) => {

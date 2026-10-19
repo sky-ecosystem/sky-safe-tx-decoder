@@ -35,9 +35,6 @@ export type SafeTxField = (typeof SAFE_TX_FIELDS)[number];
 /** Every field as the text a person entered or pasted. */
 export type SafeTxFieldValues = Record<SafeTxField, string>;
 
-/** Keys a JSON paste must contain. The other fields have safe defaults. */
-const REQUIRED_JSON_KEYS: readonly SafeTxField[] = ['to', 'value', 'data', 'operation'];
-
 /** Key order of Safe's JSON tab, so formatted output reads the same. */
 const SAFE_JSON_ORDER: readonly SafeTxField[] = [
   'to',
@@ -122,17 +119,139 @@ function topLevelKeys(text: string): string[] {
   return keys;
 }
 
+/**
+ * The offset of the first JSON syntax error in `text`, `text.length` when the
+ * text ends early, or null when the text nests too deep to scan.
+ *
+ * Only called on text that `JSON.parse` rejected. The engine's own message
+ * quotes the start of the bad text, which for a pasted address or hash is a
+ * truncated identifier. This scan finds the position without quoting
+ * anything.
+ */
+function jsonErrorOffset(text: string): number | null {
+  let i = 0;
+  const fail = (): never => {
+    throw i;
+  };
+  const skipSpace = () => {
+    while (i < text.length && ' \t\n\r'.includes(text[i]!)) i++;
+  };
+  const scanString = () => {
+    i++;
+    while (i < text.length) {
+      const ch = text[i]!;
+      if (ch === '"') {
+        i++;
+        return;
+      }
+      if (ch === '\\') {
+        i++;
+        const escape = text[i];
+        if (escape !== undefined && '"\\/bfnrt'.includes(escape)) {
+          i++;
+        } else if (escape === 'u') {
+          i++;
+          for (let k = 0; k < 4; k++) {
+            if (!/[0-9a-fA-F]/.test(text[i] ?? '')) fail();
+            i++;
+          }
+        } else {
+          fail();
+        }
+        continue;
+      }
+      if (ch < ' ') fail();
+      i++;
+    }
+    fail();
+  };
+  const number = /-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/y;
+  const scanValue = (): void => {
+    skipSpace();
+    const ch = text[i];
+    if (ch === '{' || ch === '[') {
+      const close = ch === '{' ? '}' : ']';
+      i++;
+      skipSpace();
+      if (text[i] === close) {
+        i++;
+        return;
+      }
+      for (;;) {
+        if (close === '}') {
+          skipSpace();
+          if (text[i] !== '"') fail();
+          scanString();
+          skipSpace();
+          if (text[i] !== ':') fail();
+          i++;
+        }
+        scanValue();
+        skipSpace();
+        if (text[i] === ',') {
+          i++;
+          continue;
+        }
+        if (text[i] === close) {
+          i++;
+          return;
+        }
+        fail();
+      }
+    }
+    if (ch === '"') return scanString();
+    number.lastIndex = i;
+    const match = number.exec(text);
+    if (match) {
+      i += match[0].length;
+      return;
+    }
+    for (const literal of ['true', 'false', 'null']) {
+      if (text.startsWith(literal, i)) {
+        i += literal.length;
+        return;
+      }
+    }
+    fail();
+  };
+
+  try {
+    scanValue();
+    skipSpace();
+    if (i < text.length) fail();
+    return null;
+  } catch (error) {
+    // A number is a position. Anything else is the stack running out.
+    return typeof error === 'number' ? error : null;
+  }
+}
+
+/** Why `text` is not valid JSON, by line and column, quoting none of it. */
+function invalidJsonMessage(text: string): string {
+  const offset = jsonErrorOffset(text);
+  if (offset === null) return 'Not valid JSON.';
+  if (offset >= text.length) return 'Not valid JSON. The text ends before the JSON is complete.';
+  const before = text.slice(0, offset);
+  const line = before.split('\n').length;
+  const column = offset - before.lastIndexOf('\n');
+  return `Not valid JSON. Check line ${line}, column ${column}.`;
+}
+
 export type ReadSafeTxJsonResult =
-  | { ok: true; values: Partial<SafeTxFieldValues> }
+  | { ok: true; values: SafeTxFieldValues }
   | { ok: false; error: SafeTxInputError };
 
 /**
  * Read the JSON from Safe's JSON tab into field text.
  *
  * Checks structure only: valid JSON, one object, no unknown or repeated key,
- * the four keys that describe the call present, and each value of a type the
- * JSON tab uses. Numbers may be JSON numbers or decimal strings. The values
- * themselves are checked by `validateSafeTxFields`.
+ * all ten keys present, and each value of a type the JSON tab uses. Numbers
+ * may be JSON numbers or decimal strings. The values themselves are checked
+ * by `validateSafeTxFields`.
+ *
+ * The JSON tab always writes all ten keys. A missing key means the paste is
+ * incomplete, so nothing is filled in for it: not a default, not the nonce
+ * the Safe would use next.
  */
 export function readSafeTxJson(text: string): ReadSafeTxJsonResult {
   const fail = (message: string, field: SafeTxField | null = null): ReadSafeTxJsonResult => ({
@@ -143,8 +262,9 @@ export function readSafeTxJson(text: string): ReadSafeTxJsonResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
-  } catch (error) {
-    return fail(`Not valid JSON. ${error instanceof Error ? error.message : String(error)}`);
+  } catch {
+    // The engine's message is not shown. It quotes part of the paste.
+    return fail(invalidJsonMessage(text));
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -161,13 +281,17 @@ export function readSafeTxJson(text: string): ReadSafeTxJsonResult {
   for (const key of Object.keys(record)) {
     if (!isSafeTxField(key)) return fail(`Unknown key "${key}". Copy the transaction from the JSON tab.`);
   }
-  for (const key of REQUIRED_JSON_KEYS) {
-    if (!(key in record)) return fail(`Missing key "${key}".`, key);
+  const missing = SAFE_TX_FIELDS.filter((key) => !Object.prototype.hasOwnProperty.call(record, key));
+  if (missing.length > 0) {
+    const names = missing.map((key) => `"${key}"`).join(', ');
+    return fail(
+      `Missing ${missing.length === 1 ? 'key' : 'keys'} ${names}. Copy the whole transaction from the JSON tab.`,
+      missing.length === 1 ? missing[0]! : null
+    );
   }
 
-  const values: Partial<SafeTxFieldValues> = {};
+  const values = defaultSafeTxFieldValues();
   for (const key of SAFE_TX_FIELDS) {
-    if (!(key in record)) continue;
     const raw = record[key];
     if (key === 'operation' || INTEGER_FIELDS.includes(key)) {
       if (typeof raw === 'number') {
@@ -296,14 +420,13 @@ export function validateSafeTxFields(values: SafeTxFieldValues): ValidateSafeTxR
 }
 
 /**
- * Read and validate Safe's JSON tab in one step. Keys the paste omits take
- * their defaults from `defaultSafeTxFieldValues`, so a paste without a nonce
- * is rejected for its missing nonce.
+ * Read and validate Safe's JSON tab in one step. A paste that omits any of
+ * the ten keys, the nonce included, is rejected and names the missing keys.
  */
 export function parseSafeTxJson(text: string): ValidateSafeTxResult {
   const read = readSafeTxJson(text);
   if (!read.ok) return { ok: false, errors: [read.error] };
-  return validateSafeTxFields({ ...defaultSafeTxFieldValues(), ...read.values });
+  return validateSafeTxFields(read.values);
 }
 
 /**
