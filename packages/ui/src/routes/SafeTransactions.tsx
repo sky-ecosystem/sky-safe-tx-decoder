@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   SafeApiClient,
   type SafeApiMultisigTransaction,
@@ -109,6 +109,12 @@ export default function SafeTransactions() {
             <p className="text-gray-600 text-sm">Network: {network}</p>
           </div>
           <div className="flex gap-2">
+            <Link
+              to={`/safe/${network}/${address}/propose`}
+              className="inline-flex items-center gap-1 px-3 py-2 text-sm font-medium text-white bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Paste a transaction
+            </Link>
             <a
               href={getSafeUrl(network, address)}
               target="_blank"
