@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { SafeApiClient, type SafeApiMultisigTransaction } from '@shield3/sky-safe-core';
+import { SafeApiClient, resolveRequestedTransaction, type SafeApiMultisigTransaction } from '@shield3/sky-safe-core';
 import { Address } from '../components/Address';
 import { TransactionLog } from '../components/TransactionLog';
 import { useSafeRoute } from '../safe-route/SafeRouteProvider';
@@ -51,20 +51,28 @@ export default function TransactionAnalysis() {
           setLoadingMessage(message);
         });
 
+        setTransaction(null);
+        setAllTransactions([]);
+
         // Fetch all transactions with this nonce
         const transactions = await client.fetchTransactionsByNonce(address as `0x${string}`, parseInt(nonce));
 
-        // Store all transactions
-        setAllTransactions(transactions);
-
-        // Select transaction: use safeTxHash param if provided (when switching via dropdown), otherwise use first
-        let tx: (typeof transactions)[0];
-        if (safeTxHashParam) {
-          const found = transactions.find((t) => t.safeTxHash === safeTxHashParam);
-          tx = found || transactions[0]!;
-        } else {
-          tx = transactions[0]!;
+        // A safeTxHash in the link (the same-nonce selector, or Find in queue)
+        // names one transaction. That one is shown, or an error. Never
+        // another transaction at the same nonce.
+        const resolved = await resolveRequestedTransaction({
+          safeAddress: address,
+          nonce: parseInt(nonce),
+          safeTxHash: safeTxHashParam,
+          transactions,
+          fetchByHash: (hash) => client.fetchTransactionByHash(hash),
+        });
+        if (!resolved.ok) {
+          setError(resolved.message);
+          return;
         }
+        const tx = resolved.transaction;
+        setAllTransactions(resolved.transactions);
         setTransaction(tx);
 
         // Fetch Safe version
@@ -124,7 +132,7 @@ export default function TransactionAnalysis() {
     return (
       <div className="max-w-6xl mx-auto">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">
+          <p className="text-red-800 break-words">
             <strong>Error:</strong> {error || 'Transaction not found'}
           </p>
         </div>
