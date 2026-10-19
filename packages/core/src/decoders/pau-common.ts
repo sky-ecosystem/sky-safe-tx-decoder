@@ -318,9 +318,9 @@ type PauDenomination =
  * Amount parameters whose denomination the facet source pins.
  *
  * Keyed by `<facet contract name>.<canonical signature>`. The facet name is
- * part of the key because facet function names collide across facets — three
- * facets in the frozen tables declare `deposit` and two declare `withdraw` —
- * and a denomination is only valid for the facet whose source was read.
+ * part of the key because facet function names collide across facets: three
+ * facets in the frozen tables declare `deposit` and three declare `withdraw`.
+ * A denomination is only valid for the facet whose source was read.
  *
  * Recorded only where the facet source names the unit. Every other numeric
  * parameter renders as a raw integer with the scale stated as undetermined —
@@ -337,6 +337,9 @@ type PauDenomination =
  *   property of the Basin contract. This is the same split `PAS.md` records for
  *   `LIMIT_BASIN_DEPOSIT`.
  * - **`BasinFacet.withdraw` `minConversionRate`.** A rate, not an amount.
+ * - **Every ERC4626Facet asset amount.** The asset is `token.asset()`, read on
+ *   chain at execution and absent from the calldata. The share amounts ARE
+ *   here: they count units of the vault named in parameter 0.
  */
 const PAU_AMOUNT_DENOMINATION: Record<string, Record<number, PauDenomination>> = {
   // USDSFacet.mint(uint256 usdsAmount) / burn(uint256 usdsAmount). The token is
@@ -368,6 +371,28 @@ const PAU_AMOUNT_DENOMINATION: Record<string, Record<number, PauDenomination>> =
   },
   'BasinFacet.withdraw(address,address,uint256,uint256)': {
     2: { kind: 'operand', paramIndex: 1, note: 'denominated in the asset named by parameter 1' },
+  },
+  // ERC4626Facet share amounts. Parameter 0, `token`, is the ERC-4626 vault, and
+  // the facet measures shares as the change in IERC20Like(token).balanceOf(proxy)
+  // (ERC4626Facet.sol lines 111-118, 143-155). A share amount therefore counts
+  // units of the vault's own ERC-20 token. Asset amounts are NOT here: see
+  // PAU_UNSCALED_AMOUNT.
+  //
+  // deposit(address token, uint256 amount, uint256 minSharesOut)
+  'ERC4626Facet.deposit(address,uint256,uint256)': {
+    2: { kind: 'operand', paramIndex: 0, note: 'denominated in the shares of the vault named by parameter 0' },
+  },
+  // withdraw(address token, uint256 amount, uint256 maxSharesIn)
+  'ERC4626Facet.withdraw(address,uint256,uint256)': {
+    2: { kind: 'operand', paramIndex: 0, note: 'denominated in the shares of the vault named by parameter 0' },
+  },
+  // redeem(address token, uint256 shares, uint256 minAssetsOut)
+  'ERC4626Facet.redeem(address,uint256,uint256)': {
+    1: { kind: 'operand', paramIndex: 0, note: 'denominated in the shares of the vault named by parameter 0' },
+  },
+  // setMaxExchangeRate(address token, uint256 shares, uint256 maxExpectedAssets)
+  'ERC4626Facet.setMaxExchangeRate(address,uint256,uint256)': {
+    1: { kind: 'operand', paramIndex: 0, note: 'denominated in the shares of the vault named by parameter 0' },
   },
 }
 
@@ -402,6 +427,21 @@ const PAU_UNSCALED_AMOUNT: Record<string, Record<number, string>> = {
   },
   'AaveFacet.withdraw(address,uint256)': {
     1: 'counts units of the aToken',
+  },
+  // ERC4626Facet asset amounts. The asset is IERC4626Like(token).asset(), read
+  // on chain at execution (ERC4626Facet.sol lines 104, 140, 172). It is not in
+  // the calldata, so no registry lookup can name its decimals.
+  'ERC4626Facet.deposit(address,uint256,uint256)': {
+    1: 'counts units of the vault asset',
+  },
+  'ERC4626Facet.withdraw(address,uint256,uint256)': {
+    1: 'counts units of the vault asset',
+  },
+  'ERC4626Facet.redeem(address,uint256,uint256)': {
+    2: 'counts units of the vault asset',
+  },
+  'ERC4626Facet.setMaxExchangeRate(address,uint256,uint256)': {
+    2: 'counts units of the vault asset',
   },
 }
 
@@ -528,4 +568,89 @@ export const PAU_FUNCTION_NOTES: Record<string, string> = {
     'The bound is a Uniswap v3 tick, not a price, and may be negative.',
   'UniswapV3Facet.swap(address,address,uint256,uint256,uint24)':
     'swap is bounded by maxTickDelta and by minAmountOut in this call, not by maxSlippage.',
+  // PSMFacet.sol line 102 and IPSMFacet.sol line 42: the argument is the USDC
+  // to receive, and the USDS spent is derived from it.
+  'PSMFacet.swapUSDSToUSDC(uint256)':
+    'usdcAmount is the USDC received, not the USDS spent. The USDS spent is ' +
+    'usdcAmount * to18ConversionFactor().',
+  // ERC4626Facet.sol lines 96-187. Parameter 0 is the vault. The asset is
+  // token.asset(), read at execution (lines 104, 140, 172).
+  'ERC4626Facet.deposit(address,uint256,uint256)':
+    'token is the ERC-4626 vault, not the asset deposited.',
+  'ERC4626Facet.withdraw(address,uint256,uint256)':
+    'token is the ERC-4626 vault, not the asset withdrawn.',
+  'ERC4626Facet.redeem(address,uint256,uint256)':
+    'token is the ERC-4626 vault, not the asset received.',
+  // ERC4626Facet.sol lines 76-89 (onlyRole(DEFAULT_ADMIN_ROLE)) and 120-123
+  // (the check in deposit). withdraw and redeem never read the rate.
+  'ERC4626Facet.setMaxExchangeRate(address,uint256,uint256)':
+    'Moves no funds. Caps the assets per share a deposit into this vault may pay. Does not ' +
+    'bound withdraw or redeem. Requires DEFAULT_ADMIN_ROLE, not ALLOCATOR_ROLE.',
+}
+
+// --- ERC-4626 max exchange rate ---------------------------------------------
+
+/** `ERC4626Facet.EXCHANGE_RATE_PRECISION`, ERC4626Facet.sol line 66. */
+export const PAU_EXCHANGE_RATE_PRECISION = 10n ** 36n
+
+/**
+ * Facet functions whose arguments `(token, shares, maxExpectedAssets)` set a max
+ * exchange rate, keyed by `<facet contract name>.<canonical signature>`.
+ */
+export const PAU_MAX_EXCHANGE_RATE_FUNCTIONS = new Set([
+  'ERC4626Facet.setMaxExchangeRate(address,uint256,uint256)',
+])
+
+/** What `setMaxExchangeRate` stores, and whether it needs a warning. */
+export interface MaxExchangeRateReading {
+  /** One sentence stating the stored value in full, or that the call reverts. */
+  stored: string
+  /** Set where the call reverts or where the ordinary reading is wrong. */
+  warning?: string
+}
+
+/**
+ * Read a `setMaxExchangeRate(token, shares, maxExpectedAssets)` call.
+ *
+ * The facet does not store the two arguments. It stores one rate,
+ * `EXCHANGE_RATE_PRECISION * maxExpectedAssets / shares`, rounded down
+ * (ERC4626Facet.sol lines 84-86 and 217-225). `deposit` then requires
+ * `1e36 * assetsPaid / sharesReceived` to be at most that rate (lines 120-123).
+ *
+ * The rate counts raw asset units per raw share unit. It equals 1e36 at parity
+ * only when the vault and its asset have the same decimals.
+ *
+ * `maxExpectedAssets` 0 stores 0, which is also the value before any call
+ * (IERC4626Facet.sol line 120). That does NOT remove the cap: any deposit whose
+ * computed rate is above 0 reverts. `shares` 0 with a non-zero
+ * `maxExpectedAssets` reverts with `ERC4626Facet/zero-shares`.
+ */
+export function describeMaxExchangeRate(
+  shares: bigint,
+  maxExpectedAssets: bigint
+): MaxExchangeRateReading {
+  if (maxExpectedAssets === 0n) {
+    return {
+      stored: 'Stores a max exchange rate of 0, the same value as never set.',
+      warning:
+        'A max exchange rate of 0 does NOT remove the cap. It blocks deposits into this ' +
+        'vault: any deposit whose computed rate is above 0 reverts.',
+    }
+  }
+
+  if (shares === 0n) {
+    return {
+      stored: 'Stores nothing: shares 0 with a non-zero maxExpectedAssets reverts.',
+      warning:
+        'shares is 0, so the call reverts with ERC4626Facet/zero-shares and sets nothing.',
+    }
+  }
+
+  const rate = (PAU_EXCHANGE_RATE_PRECISION * maxExpectedAssets) / shares
+  return {
+    stored:
+      `Stores a max exchange rate of 1e36 * ${maxExpectedAssets.toString()} / ` +
+      `${shares.toString()} = ${rate.toString()}, rounded down. The rate counts raw asset ` +
+      `units per raw share unit.`,
+  }
 }

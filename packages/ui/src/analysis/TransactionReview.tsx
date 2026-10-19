@@ -22,6 +22,7 @@ import {
   decodeViaSourcify,
   getSourcifyContractUrl,
   getNetwork,
+  findForwardedCalls,
   type SecurityAnalysisResult,
   type SourcifyDecodeResult,
   type DecodedFunction,
@@ -290,6 +291,48 @@ function Spinner() {
 }
 
 /**
+ * The calls a one-layer decoding forwards and does not decode.
+ *
+ * A Safe API or Sourcify decoding of a forwarder such as
+ * `call(address target, bytes data)` is correct for the outer call, and its
+ * re-encode check passes. What executes is inside `data`, and nothing decoded
+ * it. Before this notice, that rendered as an ordinary verified decoding with
+ * no warning. It now gets the same amber "Not decoded" state as a call with no
+ * ABI, with the target, selector and complete calldata. See
+ * packages/core/src/utils/forwarded-calls.ts.
+ */
+function ForwardedCallNotice({
+  parameters,
+}: {
+  parameters: ReadonlyArray<{ name: string; type: string; value: unknown }>;
+}) {
+  const calls = findForwardedCalls(parameters);
+  if (calls.length === 0) return null;
+  return (
+    <div className="space-y-3 mt-3">
+      {calls.map((call, i) => (
+        <div key={i} className="bg-amber-50 rounded p-3 border-2 border-amber-400">
+          <p className="font-semibold text-amber-900 mb-1">
+            Not decoded: the call in {call.path}
+          </p>
+          <p className="text-xs text-amber-800 mb-3">
+            This decoding covers the outer call only. Verify the forwarded calldata independently before signing.
+          </p>
+          <p className="text-xs font-semibold text-gray-700">Forwarded to:</p>
+          <div className="text-xs bg-white p-2 rounded border break-all mb-2">
+            {call.target ? <Address address={call.target} /> : 'not determined from the decoding'}
+          </div>
+          <p className="text-xs font-semibold text-gray-700">Function selector:</p>
+          <p className="text-xs font-mono bg-white p-2 rounded border break-all mb-2">{call.selector}</p>
+          <p className="text-xs font-semibold text-gray-700">Calldata:</p>
+          <p className="text-xs font-mono bg-white p-2 rounded border break-all">{call.calldata}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
  * Render a decoding obtained from a Sourcify ABI. Only the provenance banner is
  * Sourcify-specific — the source of a decoding matters to a signer, so it is
  * shown explicitly and distinctly from a Safe API decoding. The parameter rows
@@ -413,6 +456,7 @@ function SourcifyDecodedView({
         parameters={result.parameters}
         amountTarget={{ network, to, signature: result.signature }}
       />
+      <ForwardedCallNotice parameters={result.parameters} />
     </div>
   );
 }
@@ -1220,6 +1264,7 @@ export function TransactionReview({
                                   }
                             }
                           />
+                          <ForwardedCallNotice parameters={item.apiDecoded.parameters} />
                         </div>
                       )}
 
@@ -1374,6 +1419,7 @@ export function TransactionReview({
                       </div>
                     </div>
                   )}
+                  <ForwardedCallNotice parameters={apiDecoded.parameters} />
                 </div>
               )}
 

@@ -37,7 +37,7 @@ import {
   type PauDispatchMismatch,
 } from './pau-common.js'
 import { PAU_DISPATCH_TABLES } from './pau-dispatch-table.js'
-import { PAU_ADMINISTERED_AGENTS, PAU_BATCH_CALL_SELECTOR } from './pau-agent.js'
+import { PAU_ADMINISTERED_AGENTS, PAU_BATCH_CALL_SELECTOR, PAU_CALL_SELECTOR } from './pau-agent.js'
 
 /** `getDispatches(bytes4[])` on the Controller. All Controllers expose it. */
 const GET_DISPATCHES_ABI = [
@@ -59,7 +59,7 @@ const GET_DISPATCHES_ABI = [
   },
 ] as const
 
-const BATCH_CALL_ABI = [
+const AGENT_ABI = [
   {
     type: 'function',
     name: 'batchCall',
@@ -68,6 +68,16 @@ const BATCH_CALL_ABI = [
       { name: 'targets', type: 'address[]' },
       { name: 'data', type: 'bytes[]' },
       { name: 'values', type: 'uint256[]' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'call',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'target', type: 'address' },
+      { name: 'data', type: 'bytes' },
     ],
     outputs: [],
   },
@@ -106,8 +116,8 @@ export interface PauVerification {
  * reach. Pure: it reads calldata and the frozen tables, nothing else.
  *
  * Returns an empty array when `to` is not a known AdministeredAgent, when the
- * call is not `batchCall`, or when no target is a Controller in the frozen
- * tables. A Controller the tables do not cover cannot be checked against them,
+ * call is neither `batchCall` nor `call`, or when no target is a Controller in
+ * the frozen tables. A Controller the tables do not cover cannot be checked against them,
  * so it is left out — the decoder reports it as undecodable on its own.
  */
 export function pauVerificationTargets(
@@ -119,15 +129,17 @@ export function pauVerificationTargets(
     candidate => candidate.address.toLowerCase() === to.trim().toLowerCase()
   )
   if (!agent) return []
-  if (data.slice(0, 10).toLowerCase() !== PAU_BATCH_CALL_SELECTOR) return []
+  const selector = data.slice(0, 10).toLowerCase()
+  if (selector !== PAU_BATCH_CALL_SELECTOR && selector !== PAU_CALL_SELECTOR) return []
 
   let targets: readonly Address[]
   let calls: readonly Hex[]
   try {
-    const decoded = decodeFunctionData({ abi: BATCH_CALL_ABI, data })
+    const decoded = decodeFunctionData({ abi: AGENT_ABI, data })
     const args = (decoded.args ?? []) as readonly unknown[]
-    targets = args[0] as readonly Address[]
-    calls = args[1] as readonly Hex[]
+    // `call(address,bytes)` is a batch of one.
+    targets = decoded.functionName === 'call' ? [args[0] as Address] : (args[0] as readonly Address[])
+    calls = decoded.functionName === 'call' ? [args[1] as Hex] : (args[1] as readonly Hex[])
   } catch {
     return []
   }

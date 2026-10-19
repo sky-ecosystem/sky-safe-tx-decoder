@@ -3,8 +3,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseAbi, type Abi, type Hex } from 'viem';
+import { encodeFunctionData, parseAbi, type Abi, type Hex } from 'viem';
 import { decodeWithAbi } from './sourcify-decode.js';
+import { findForwardedCalls } from '../utils/forwarded-calls.js';
 
 // Real mainnet calldata: withdrawV3(address,address,uint256), the first nested
 // call of Safe 0x22740deBa78d5a0c24C58C740e3715ec29de1bFa nonce 224.
@@ -78,5 +79,27 @@ describe('decodeWithAbi', () => {
     expect(result).not.toBeNull();
     expect(result!.signature).toBe('withdrawV3(address,address,uint256)');
     expect(result!.verified).toBe(true);
+  });
+
+  it('keeps tuple components, so findForwardedCalls reaches bytes inside Multicall3 aggregate', () => {
+    const abi = parseAbi([
+      'struct Call { address target; bytes callData; }',
+      'function aggregate(Call[] calls) returns (uint256 blockNumber, bytes[] returnData)',
+    ]);
+    const usdc = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+    const transfer: Hex =
+      '0xa9059cbb000000000000000000000000000000000000000000000000000000000000dead000000000000000000000000000000000000000000000000000000e8d4a51000';
+    const data = encodeFunctionData({ abi, functionName: 'aggregate', args: [[{ target: usdc, callData: transfer }]] });
+
+    const result = decodeWithAbi(abi, data);
+
+    expect(result!.verified).toBe(true);
+    expect(result!.parameters[0]!.components).toEqual([
+      { name: 'target', type: 'address' },
+      { name: 'callData', type: 'bytes' },
+    ]);
+    expect(findForwardedCalls(result!.parameters).map((c) => [c.path, c.target, c.calldata])).toEqual([
+      ['calls[0].callData', usdc, transfer],
+    ]);
   });
 });

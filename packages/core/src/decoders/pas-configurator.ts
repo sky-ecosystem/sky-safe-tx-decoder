@@ -112,6 +112,7 @@ export class PASConfiguratorDecoder implements CustomDecoder {
     // "decoder verification failed". See spbeam.ts.
     if (reencode.status === 'trailing') {
       main.warnings = [...(main.warnings ?? []), ...reencode.warnings]
+      main.trailingCalldata = reencode.trailing
       if (main.riskLevel !== 'high') main.riskLevel = 'medium'
       return { main, isMulticall: false }
     }

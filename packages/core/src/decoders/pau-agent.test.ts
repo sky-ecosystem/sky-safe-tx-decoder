@@ -21,11 +21,68 @@ import { encodeAbiParameters, encodeFunctionData, parseAbi } from 'viem';
 import { decodeMultiSend } from '../security/multisend-decoder.js';
 import { PAUAdministeredAgentDecoder, createPauAgentDecoders } from './pau-agent.js';
 import { isPauFrozenTableCaveat } from './pau-common.js';
+import { isCallFullyDecoded } from '../utils/forwarded-calls.js';
 
 const GROVE_AGENT = '0xdBD17832df0e57b1732cE1C84c652E820e549BAa';
 const GROVE_CONTROLLER = '0xbf83F5974B932c7D842254042717D6A2706CE5eE';
 const UNISWAP_V3_FACET = '0x445D9Dc752F269Be48250f1A180CAC4c61cE4bab';
 const AUSD_USDC_POOL = '0xbAFeAd7c60Ea473758ED6c6021505E8BBd7e8E5d';
+
+const SECOND_AGENT = '0x1837505D104F7a6D8b7e19452610B0A3D652EF12';
+const SECOND_CONTROLLER = '0x24169Afb34fAe4D4356BC54Bd80319131e35ca38';
+const PSM_FACET = '0xE4A5dAc768a310cc2316f258901b32E499653064';
+const ERC4626_FACET = '0x1dCA18608c89174181153E786778705b4A0E1a06';
+/** "Osero x Gauntlet USDC Prime", 18-decimal shares over USDC. Not on Sourcify. */
+const OSERO_VAULT = '0x802148D518A6De2aF866f9A61ffB5e5C39156dB2';
+
+/**
+ * Real Controller calldata from Safe 0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26.
+ *
+ * - nonce 22, safeTxHash 0x258d719cff23b4c21250933e471645f28e1c8ed8d10cb3692c16e4c30b8163e9:
+ *   swapUSDSToUSDC and deposit
+ * - nonce 23, safeTxHash 0xf3f4dac699606e56bfb467feb0f06fe9560e6060dc84d464554d19eb69903dfe:
+ *   withdraw
+ * - nonce 24, safeTxHash 0xb361e998b3b5c25c2c536f83ad558efdb2d24e1209a50b06d26c0a5e4aba4fda:
+ *   redeem
+ */
+const REAL = {
+  swapUSDSToUSDC:
+    '0x3f45168c000000000000000000000000000000000000000000000000000000e8d4a51000',
+  deposit:
+    '0xfc78974a000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db2000000000000000000000000000000000000000000000000000000e8d4a5100000000000000000000000000000000000000000000000d2e2eb6c9f64d10bef60',
+  withdraw:
+    '0xd04771b8000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db20000000000000000000000000000000000000000000000000000005d21dba000000000000000000000000000000000000000000000005484860fb7f9de20c037',
+  redeem:
+    '0xe7accdce000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db2000000000000000000000000000000000000000000007ea954dee7dfbfcc32240000000000000000000000000000000000000000000000000000008b92d193c5',
+} as const satisfies Record<string, Hex>;
+
+/** The complete Safe transaction data of nonces 22, 23 and 24. */
+const REAL_NONCE_22: Hex =
+  '0x8d80ff0a0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000032b001837505d104f7a6d8b7e19452610b0a3d652ef12000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a41b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca3800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000024a5b7e02d00000000000000000000000000000000000000000000d3c21bcecceda100000000000000000000000000000000000000000000000000000000000000001837505d104f7a6d8b7e19452610b0a3d652ef12000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a41b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca38000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000243f45168c000000000000000000000000000000000000000000000000000000e8d4a5100000000000000000000000000000000000000000000000000000000000001837505d104f7a6d8b7e19452610b0a3d652ef12000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e41b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca3800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000064fc78974a000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db2000000000000000000000000000000000000000000000000000000e8d4a5100000000000000000000000000000000000000000000000d2e2eb6c9f64d10bef6000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
+const REAL_NONCE_23: Hex =
+  '0x1b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca3800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000064d04771b8000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db20000000000000000000000000000000000000000000000000000005d21dba000000000000000000000000000000000000000000000005484860fb7f9de20c03700000000000000000000000000000000000000000000000000000000';
+const REAL_NONCE_24: Hex =
+  '0x1b8b921d00000000000000000000000024169afb34fae4d4356bc54bd80319131e35ca3800000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000064e7accdce000000000000000000000000802148d518a6de2af866f9a61ffb5e5c39156db2000000000000000000000000000000000000000000007ea954dee7dfbfcc32240000000000000000000000000000000000000000000000000000008b92d193c500000000000000000000000000000000000000000000000000000000';
+
+const CALL_ABI = parseAbi(['function call(address target, bytes data)']);
+
+/** ERC4626Facet.setMaxExchangeRate through call selector 0xa3124407. */
+function setMaxExchangeRate(token: Address, shares: bigint, maxExpectedAssets: bigint): Hex {
+  return ('0xa3124407' +
+    encodeAbiParameters(
+      [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }],
+      [token, shares, maxExpectedAssets]
+    ).slice(2)) as Hex;
+}
+
+/**
+ * A context bullet, matched on its label and value. The separator between them
+ * is the decoder's own and is matched as any single non-space character.
+ */
+function bullet(label: string, value: string): RegExp {
+  const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`${escape(label)} \\S ${escape(value)}`);
+}
 
 const ALL_FIXTURES = [
   'pau-usds-mint-basin-deposit',
@@ -81,9 +138,13 @@ describe('PAUAdministeredAgentDecoder.canDecode', () => {
     );
   });
 
-  it('ignores call(address,bytes), which the Sourcify fallback covers', () => {
-    // AdministeredAgent.call is verified on Sourcify. Claiming it here would
-    // replace a working decoding with one this build has never seen exercised.
+  it('claims call(address,bytes) to its own agent', () => {
+    // Safe 0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26 reaches the second
+    // Controller through call as well as batchCall.
+    expect(decoder.canDecode(GROVE_AGENT, '0x1b8b921d' as Hex)).toBe(true);
+  });
+
+  it('ignores call(address,uint256,bytes), which the agent does not declare', () => {
     expect(decoder.canDecode(GROVE_AGENT, '0x6dbf2fa0' as Hex)).toBe(false);
   });
 
@@ -436,8 +497,308 @@ describe('batch-level checks', () => {
     ]);
   });
 
-  it('exposes only batchCall as supported', () => {
-    expect(decoder.getSupportedFunctions()).toEqual(['batchCall']);
+  it('exposes batchCall and call as supported', () => {
+    expect(decoder.getSupportedFunctions()).toEqual(['batchCall', 'call']);
+  });
+});
+
+/**
+ * The PSM and ERC-4626 facets wired on the second Controller at block 26176894,
+ * transaction 0x8d5df19c9ba9da856ac5cf7ff7455ba898a077615145b69f2fb0b08ee5be02d4.
+ *
+ * The swap, deposit, withdraw and redeem payloads are the real Controller
+ * calldata of executed transactions from Safe
+ * 0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26, nonces 22 to 24. Those
+ * transactions use AdministeredAgent.call; here the same bytes are wrapped in
+ * batchCall, and the call path is tested separately below.
+ */
+describe('the PSM and ERC-4626 facets on the second Controller', () => {
+  const second = new PAUAdministeredAgentDecoder({
+    address: SECOND_AGENT,
+    label: 'PAU AdministeredAgent 0x1837505D104F7a6D8b7e19452610B0A3D652EF12',
+    network: 'ethereum',
+  });
+  const one = (data: Hex) => {
+    const decoded = second.decode(batchCall([{ target: SECOND_CONTROLLER, data }]));
+    return { decoded, call: decoded.nested![0]! };
+  };
+
+  it('decodes swapUSDSToUSDC from nonce 22 in USDC, the amount received', () => {
+    const { decoded, call } = one(REAL.swapUSDSToUSDC);
+    expect(call.signature).toBe('swapUSDSToUSDC(uint256)');
+    expect(call.explanation).toMatch(bullet('Call selector (sent)', '0x3f45168c'));
+    expect(call.explanation).toMatch(bullet('Delegate selector (executed)', '0x5acb7053'));
+    expect(call.explanation).toMatch(bullet('Facet', `${PSM_FACET} (PSMFacet)`));
+    expect(call.explanation).toMatch(
+      bullet('Integration id', '0x50534d5f46414345540000000000000000000000000000000000000000000000 (PSM_FACET)')
+    );
+    expect(paramValue(call, 'usdcAmount')).toBe('1000000000000 = 1,000,000 USDC');
+    expect(call.explanation).toContain('usdcAmount is the USDC received, not the USDS spent');
+    expect(call.riskLevel).toBe('medium');
+    expect(decoded.generalWarnings).toBeUndefined();
+  });
+
+  it('decodes swapUSDCToUSDS in USDC, the amount spent', () => {
+    const data = ('0x8c88adef' +
+      encodeAbiParameters([{ type: 'uint256' }], [250_000_000_000n]).slice(2)) as Hex;
+    const { call } = one(data);
+    expect(call.signature).toBe('swapUSDCToUSDS(uint256)');
+    expect(call.explanation).toMatch(bullet('Delegate selector (executed)', '0x115c48d5'));
+    expect(paramValue(call, 'usdcAmount')).toBe('250000000000 = 250,000 USDC');
+    expect(call.explanation).not.toContain('not the USDS spent');
+  });
+
+  it('decodes deposit from nonce 22: vault first, asset amount unscaled, shares a minimum', () => {
+    const { call } = one(REAL.deposit);
+    expect(call.signature).toBe('deposit(address,uint256,uint256)');
+    expect(call.explanation).toMatch(bullet('Call selector (sent)', '0xfc78974a'));
+    expect(call.explanation).toMatch(bullet('Delegate selector (executed)', '0x0efe6a8b'));
+    expect(call.explanation).toMatch(bullet('Facet', `${ERC4626_FACET} (ERC4626Facet)`));
+    expect(call.explanation).toMatch(
+      bullet('Integration id', '0x455243343632365f464143455400000000000000000000000000000000000000 (ERC4626_FACET)')
+    );
+    expect(paramValue(call, 'token')).toBe(OSERO_VAULT);
+    // The asset is token.asset(), which the calldata does not carry. A bare
+    // integer keeps the UI's decimals picker live.
+    expect(call.parameters.find(p => p.name === 'amount')!.value).toBe(1_000_000_000_000n);
+    expect(call.parameters.find(p => p.name === 'minSharesOut')!.value).toBe(995882889672435604123488n);
+    expect(call.explanation).toContain('token is the ERC-4626 vault, not the asset deposited.');
+    expect(call.explanation).toContain('amount counts units of the vault asset.');
+    expect(call.explanation).toContain(
+      `minSharesOut is denominated in the shares of the vault named by parameter 0 (${OSERO_VAULT}).`
+    );
+  });
+
+  it('decodes withdraw from nonce 23: asset amount, then a maximum on shares burned', () => {
+    const { call } = one(REAL.withdraw);
+    expect(call.signature).toBe('withdraw(address,uint256,uint256)');
+    expect(call.explanation).toMatch(bullet('Delegate selector (executed)', '0xb5c5f672'));
+    expect(paramValue(call, 'token')).toBe(OSERO_VAULT);
+    expect(call.parameters.find(p => p.name === 'amount')!.value).toBe(400_000_000_000n);
+    expect(call.parameters.find(p => p.name === 'maxSharesIn')!.value).toBe(399123414920789393195063n);
+    expect(call.explanation).toContain('token is the ERC-4626 vault, not the asset withdrawn.');
+    expect(call.explanation).toContain('amount counts units of the vault asset.');
+    expect(call.explanation).toContain('maxSharesIn is denominated in the shares of the vault');
+  });
+
+  it('decodes redeem from nonce 24: shares first, then a minimum on assets received', () => {
+    const { call } = one(REAL.redeem);
+    expect(call.signature).toBe('redeem(address,uint256,uint256)');
+    expect(call.explanation).toMatch(bullet('Delegate selector (executed)', '0x2b83cccd'));
+    expect(paramValue(call, 'token')).toBe(OSERO_VAULT);
+    expect(call.parameters.find(p => p.name === 'shares')!.value).toBe(598141792170324408414756n);
+    expect(call.parameters.find(p => p.name === 'minAssetsOut')!.value).toBe(599463662533n);
+    expect(call.explanation).toContain('token is the ERC-4626 vault, not the asset received.');
+    expect(call.explanation).toContain('shares is denominated in the shares of the vault');
+    expect(call.explanation).toContain('minAssetsOut counts units of the vault asset.');
+  });
+
+  it('scales a share amount when the vault is in the token registry', () => {
+    // sUSDS 0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD, 18 decimals in the
+    // registry. Shares are the vault's own ERC-20 units, so the vault's decimals
+    // apply. The asset amount stays unscaled.
+    const SUSDS = '0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD';
+    const data = ('0xfc78974a' +
+      encodeAbiParameters(
+        [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }],
+        [SUSDS, 10n ** 24n, 95n * 10n ** 22n]
+      ).slice(2)) as Hex;
+    const { call } = one(data);
+    expect(paramValue(call, 'minSharesOut')).toBe('950000000000000000000000 = 950,000 sUSDS');
+    expect(call.parameters.find(p => p.name === 'amount')!.value).toBe(10n ** 24n);
+  });
+
+  it('renders the rate setMaxExchangeRate stores, matching the value set on chain', () => {
+    // The wiring spell set 2000000000000000000000000 for this vault: 2 USDC
+    // (6 decimals) per share (18 decimals), so 1e36 * 2e6 / 1e18.
+    const { decoded, call } = one(setMaxExchangeRate(OSERO_VAULT, 10n ** 18n, 2_000_000n));
+    expect(call.signature).toBe('setMaxExchangeRate(address,uint256,uint256)');
+    expect(call.explanation).toMatch(bullet('Delegate selector (executed)', '0x7011df99'));
+    expect(paramValue(call, 'token')).toBe(OSERO_VAULT);
+    expect(call.parameters.find(p => p.name === 'shares')!.value).toBe(10n ** 18n);
+    expect(call.parameters.find(p => p.name === 'maxExpectedAssets')!.value).toBe(2_000_000n);
+    expect(call.explanation).toContain(
+      'Stores a max exchange rate of 1e36 * 2000000 / 1000000000000000000 = ' +
+        '2000000000000000000000000, rounded down.'
+    );
+    expect(call.explanation).toContain('Moves no funds.');
+    expect(call.explanation).toContain('Requires DEFAULT_ADMIN_ROLE, not ALLOCATOR_ROLE.');
+    expect(call.warnings).toEqual([]);
+    expect(decoded.main.riskLevel).toBe('medium');
+  });
+
+  it('warns that maxExpectedAssets 0 blocks deposits rather than removing the cap', () => {
+    const { decoded, call } = one(setMaxExchangeRate(OSERO_VAULT, 10n ** 18n, 0n));
+    expect(call.explanation).toContain('Stores a max exchange rate of 0');
+    expect(call.warnings!.join('\n')).toContain('does NOT remove the cap');
+    // The UI renders the batch's warnings, not a nested call's.
+    expect(decoded.main.warnings!.join('\n')).toContain('does NOT remove the cap');
+  });
+
+  it('warns that shares 0 with non-zero assets reverts', () => {
+    const { call } = one(setMaxExchangeRate(OSERO_VAULT, 0n, 1n));
+    expect(call.warnings!.join('\n')).toContain('ERC4626Facet/zero-shares');
+  });
+
+  it('decodes every new call in one batch with a single frozen-table caveat', () => {
+    const decoded = second.decode(
+      batchCall([
+        { target: SECOND_CONTROLLER, data: REAL.swapUSDSToUSDC },
+        { target: SECOND_CONTROLLER, data: REAL.deposit },
+        { target: SECOND_CONTROLLER, data: REAL.withdraw },
+        { target: SECOND_CONTROLLER, data: REAL.redeem },
+      ])
+    );
+    expect(decoded.nested!.map(call => call.name)).toEqual([
+      'swapUSDSToUSDC',
+      'deposit',
+      'withdraw',
+      'redeem',
+    ]);
+    expect(decoded.main.riskLevel).toBe('medium');
+    expect(decoded.generalWarnings).toBeUndefined();
+    expect(decoded.main.warnings!.filter(isPauFrozenTableCaveat)).toHaveLength(1);
+  });
+});
+
+/**
+ * AdministeredAgent.call(address,bytes), `0x1b8b921d`.
+ *
+ * Every executed transaction that reaches the new facets uses it: Safe
+ * 0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26 nonces 22 to 25. The payloads
+ * below are those transactions' real calldata.
+ */
+describe('AdministeredAgent.call', () => {
+  const second = new PAUAdministeredAgentDecoder({
+    address: SECOND_AGENT,
+    label: 'PAU AdministeredAgent 0x1837505D104F7a6D8b7e19452610B0A3D652EF12',
+    network: 'ethereum',
+  });
+
+  it('decodes nonce 23, a direct call to the agent, as a batch of one', () => {
+    expect(second.canDecode(SECOND_AGENT, REAL_NONCE_23)).toBe(true);
+    const decoded = second.decode(REAL_NONCE_23);
+
+    expect(decoded.isMulticall).toBe(true);
+    expect(decoded.main.name).toBe('call');
+    expect(decoded.main.signature).toBe('call(address,bytes)');
+    expect(decoded.main.parameters).toEqual([]);
+    expect(decoded.generalWarnings).toBeUndefined();
+    expect(decoded.main.warnings!.filter(isPauFrozenTableCaveat)).toHaveLength(1);
+
+    expect(decoded.nested).toHaveLength(1);
+    const withdraw = decoded.nested![0]!;
+    expect(withdraw.signature).toBe('withdraw(address,uint256,uint256)');
+    expect(withdraw.target).toBe(SECOND_CONTROLLER);
+    expect(withdraw.rawCalldata).toBe(REAL.withdraw);
+    expect(paramValue(withdraw, 'token')).toBe(OSERO_VAULT);
+  });
+
+  it('decodes nonce 24, redeem', () => {
+    const decoded = second.decode(REAL_NONCE_24);
+    expect(decoded.nested![0]!.signature).toBe('redeem(address,uint256,uint256)');
+    expect(decoded.nested![0]!.rawCalldata).toBe(REAL.redeem);
+  });
+
+  it('decodes each agent call inside the nonce 22 MultiSend', () => {
+    const inner = decodeMultiSend(REAL_NONCE_22);
+    expect(inner).not.toBeNull();
+    const agentCalls = inner!.filter(item => item.to.toLowerCase() === SECOND_AGENT.toLowerCase());
+    expect(agentCalls).toHaveLength(3);
+    const names = agentCalls.map(item => {
+      expect(second.canDecode(item.to as Address, item.data as Hex)).toBe(true);
+      return second.decode(item.data as Hex).nested![0]!.name;
+    });
+    expect(names).toEqual(['mint', 'swapUSDSToUSDC', 'deposit']);
+  });
+
+  it('states that call forwards the ETH sent to the agent, not a number', () => {
+    // msg.value is not in the calldata. A "0 wei" here would be a guess.
+    const call = second.decode(REAL_NONCE_23).nested![0]!;
+    expect(call.explanation).toMatch(
+      bullet('ETH value', 'the value sent to the AdministeredAgent, which call forwards in full')
+    );
+    expect(call.explanation).not.toContain('0 wei');
+  });
+
+  it('refuses to name a call selector the table does not hold', () => {
+    const data = encodeFunctionData({
+      abi: CALL_ABI,
+      functionName: 'call',
+      args: [SECOND_CONTROLLER, '0xdeadbeef0000000000000000000000000000000000000000000000000000000000000001'],
+    });
+    const decoded = second.decode(data);
+    expect(decoded.nested![0]!.name).toBe('unknown call selector');
+    expect(decoded.main.riskLevel).toBe('high');
+    expect(decoded.main.warnings!.join('\n')).toContain('0xdeadbeef');
+  });
+
+  it('never reports a call it cannot name as anything below high risk', () => {
+    // Every way the inner Controller call can be unrecognised: a selector that
+    // is on no frozen table at all, a real selector of the OTHER Controller,
+    // a target with no frozen table, and calldata with no selector. Each must
+    // reach the same high-risk state, with its warning lifted onto the outer
+    // call, which is the list the UI renders.
+    const cases: Array<{ target: Address; data: Hex; name: string; mustMention: string }> = [
+      { target: SECOND_CONTROLLER, data: '0xdeadbeef', name: 'unknown call selector', mustMention: '0xdeadbeef' },
+      // 0xe4696d83 is Grove's BasinFacet.deposit. It is not wired on the second Controller.
+      {
+        target: SECOND_CONTROLLER,
+        data: '0xe4696d830000000000000000000000000000000000000000000000000000000000000001',
+        name: 'unknown call selector',
+        mustMention: '0xe4696d83',
+      },
+      {
+        target: '0x0DD65461610Fe5b65cE50A870B10ED0F3d24d8C2',
+        data: REAL.withdraw,
+        name: 'unknown Controller',
+        mustMention: '0x0DD65461610Fe5b65cE50A870B10ED0F3d24d8C2',
+      },
+      { target: SECOND_CONTROLLER, data: '0x', name: 'call with no selector', mustMention: SECOND_CONTROLLER },
+    ];
+    for (const { target, data, name, mustMention } of cases) {
+      const encoded = encodeFunctionData({ abi: CALL_ABI, functionName: 'call', args: [target, data] });
+      expect(second.canDecode(SECOND_AGENT, encoded)).toBe(true);
+      const decoded = second.decode(encoded);
+      const inner = decoded.nested![0]!;
+      expect(inner.name).toBe(name);
+      expect(inner.riskLevel).toBe('high');
+      expect(inner.parameters).toEqual([]);
+      expect(inner.rawCalldata).toBe(data);
+      expect(decoded.main.riskLevel).toBe('high');
+      expect(decoded.main.warnings!.join('\n')).toContain(mustMention);
+    }
+  });
+
+  it('reports trailing calldata on call rather than decoding around it', () => {
+    const decoded = second.decode((REAL_NONCE_23 + 'deadbeef') as Hex);
+    expect(decoded.main.warnings!.join('\n')).toMatch(/Extra|trailing/i);
+    expect(decoded.main.riskLevel).toBe('medium');
+  });
+
+  it('marks trailing bytes on the outer call, so the CLI withholds its all-clear', () => {
+    const data = (REAL_NONCE_23 + 'deadbeef') as Hex;
+    const decoded = second.decode(data);
+    expect(decoded.main.trailingCalldata).toBe('0xdeadbeef');
+    expect(isCallFullyDecoded({ data, custom: decoded, decoded: false })).toBe(false);
+  });
+
+  it('marks trailing bytes inside the forwarded Controller call (review probe case 8)', () => {
+    // mint(1000000000000000000000000) with one 0xff byte appended. The outer
+    // call re-encodes exactly, because the extra byte is inside `data`.
+    const mint = '0xa5b7e02d00000000000000000000000000000000000000000000d3c21bcecceda1000000';
+    const data = encodeFunctionData({ abi: CALL_ABI, functionName: 'call', args: [SECOND_CONTROLLER, `${mint}ff`] });
+    const decoded = second.decode(data);
+    expect(decoded.main.trailingCalldata).toBeUndefined();
+    expect(decoded.nested![0]!.trailingCalldata).toBe('0xff');
+    expect(isCallFullyDecoded({ data, custom: decoded, decoded: false })).toBe(false);
+  });
+
+  it('leaves real nonce 23 unmarked', () => {
+    const decoded = second.decode(REAL_NONCE_23);
+    expect(decoded.main.trailingCalldata).toBeUndefined();
+    expect(decoded.nested!.every(call => call.trailingCalldata === undefined)).toBe(true);
+    expect(isCallFullyDecoded({ data: REAL_NONCE_23, custom: decoded, decoded: false })).toBe(true);
   });
 });
 

@@ -13,6 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Hex } from 'viem';
 import { PASConfiguratorDecoder } from './pas-configurator.js';
+import { isCallFullyDecoded } from '../utils/forwarded-calls.js';
 
 const CONFIGURATOR = '0xb7E61Df6CAb0A51E9A5dab1A7DD3f942dDe5b929';
 const GROVE_RATE_LIMITS = '0xE016Ae733A77Ba77E7907aAA749394Fc5e75C0e1';
@@ -363,6 +364,17 @@ describe('PASConfiguratorDecoder', () => {
 
       expect(param(result.main, 'key name')).toBe('LIMIT_USDS_MINT');
       expect(param(result.main, 'maxAmount')).toContain('5,000,000 USDS');
+    });
+
+    it('should mark the trailing bytes, so the CLI withholds its all-clear', () => {
+      for (const clean of [SET_USDS_MINT, CALL_CONTROLLER_ACTION]) {
+        const data = (clean + 'deadbeef') as Hex;
+        const result = decoder.decode(data);
+
+        expect(result.main.trailingCalldata).toBe('0xdeadbeef');
+        expect(isCallFullyDecoded({ data, custom: result, decoded: false })).toBe(false);
+        expect(decoder.decode(clean).main.trailingCalldata).toBeUndefined();
+      }
     });
 
     it('should flag trailing calldata on callControllerAction too', () => {

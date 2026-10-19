@@ -61,11 +61,17 @@ returned bytecode for every address, and each matched on Sourcify.
 | RateLimits | `0xE9a78f34fe497e2186f81B8c014cd93B308BC62a` |
 | AaveFacet | `0x8CE890A96a193ff2DD4B2eA3C682326F655f6b62` |
 | USDSFacet | `0x1221CC4B85Ab260660aD21C2829e0EB516dffBc7` |
+| PSMFacet | `0xE4A5dAc768a310cc2316f258901b32E499653064` |
+| ERC4626Facet | `0x1dCA18608c89174181153E786778705b4A0E1a06` |
 
-`0x1837505D104F7a6D8b7e19452610B0A3D652EF12` holds `ALLOCATOR_ROLE`
-(`0x68bf109b95a5c15fb2bb99041323c27d15f8675e11bf7420a1cd6ad64c394f46`) on that AccessControls,
-read from its `RoleGranted` log at block 25383064. Its actor list contains Safe
-`0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26`, which originates the calls.
+The AdministeredAgent forwards to any target. It reaches this Controller because it holds this Controller's allocator role. Read on 2026-10-16:
+
+- `Controller.accessControls()` returns `0x791D2a017532CfAD881c446e6bF93BbC3c0778b2`.
+- `0x1837505D104F7a6D8b7e19452610B0A3D652EF12` is the only member of `ALLOCATOR_ROLE` (`0x68bf109b95a5c15fb2bb99041323c27d15f8675e11bf7420a1cd6ad64c394f46`) on that AccessControls. Its `RoleGranted` log is at block 25383064, transaction `0xff3acce7d732e47730320fa202a8553626fc14286048be4c3c1a5fb173e43640`.
+- `DEFAULT_ADMIN_ROLE` has two members: SubProxy `0x24fdcd3bFA5C2553e05B2f9AD0365EBC296278D3` and the PAS Configurator `0xb7E61Df6CAb0A51E9A5dab1A7DD3f942dDe5b929`. The agent is not a member.
+- The agent's actor list holds two Safes, both added at block 25383064: `0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26` and `0x29c5A20A49A0D522A3714af97C517a908946b6A8`.
+- Safe `0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26` originates the calls. Its multisig history on 2026-10-16 holds 27 transactions, nonces 0 to 26. 26 of them call the agent, and every forwarded call targets `0x24169Afb34fAe4D4356BC54Bd80319131e35ca38`. Nonce 9 is a call to the Safe itself.
+- Safe `0x29c5A20A49A0D522A3714af97C517a908946b6A8` holds 2 multisig transactions, nonces 0 and 1. Neither calls the agent.
 
 **Which sub-DAO owns this Controller was not determined.**
 
@@ -112,11 +118,15 @@ appear in that ABI. Proxy resolution does not help: this is not an EIP-1967 prox
 | Selector | Signature | Decoded |
 | --- | --- | --- |
 | `0x4e120423` | `batchCall(address[] targets, bytes[] data, uint256[] values)` | yes |
-| — | `call(address target, bytes data)` | no |
+| `0x1b8b921d` | `call(address target, bytes data)` | yes |
 
-`call` is not decoded. Every observed PAU allocator transaction uses `batchCall`, and the
-AdministeredAgent is verified on Sourcify, so a `call` falls through to the Sourcify fallback
-in the web UI.
+`call` decodes as a batch of one. The Controller call renders exactly as a `batchCall` entry does.
+
+`call` was not decoded before. Safe `0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26` uses it in 7 of its 27 transactions: nonces 2, 3 and 4 (AaveFacet) and 22 to 25 (PSMFacet and ERC4626Facet). In those transactions the Safe API decoded the outer `call(address,bytes)` and left the Controller call as opaque `bytes`. That decoding re-encodes exactly, so the tool counted the call as decoded, and the security analysis does not read decodings. The CLI printed "No security risks detected" and the web UI showed no warning.
+
+An unrecognised Controller call through `call` now reaches the same state as in a `batchCall`: a selector the frozen table does not hold, a Controller with no table, or a call with no selector renders as undecodable with `riskLevel: 'high'`, and its warning is lifted onto the outer call. A forwarder that no custom decoder covers, such as an AdministeredAgent at an unregistered address, gets the generic "Not decoded" notice for its forwarded calldata (`packages/core/src/utils/forwarded-calls.ts`).
+
+`call` forwards `msg.value` (`AdministeredAgent.sol`: `Address.functionCallWithValue(target, data, msg.value)`). That amount is not in the calldata, so the ETH value bullet names its source instead of a number. The value appears on the transaction line above the decoding.
 
 ## The frozen dispatch table
 
@@ -178,6 +188,15 @@ Two qualifications.
   version counter. `updateIntegrations` on an existing id deletes the old wires and installs
   the current Beacon config, so a remap is possible. It has not been exercised.
 
+The first wiring after that measurement is also additive. Controller `0x24169Afb34fAe4D4356BC54Bd80319131e35ca38` emitted two `IntegrationSet` events at block 26176894 (2026-10-12), transaction `0x8d5df19c9ba9da856ac5cf7ff7455ba898a077615145b69f2fb0b08ee5be02d4`, sent by `0x39c9fb0257c054609de6ea4f68391f072b860de3` to StarGuardJob `0xb18d211fa69422a9a848b790c5b4a3957f7aa44e`.
+
+| Log index | Integration id | Facet | Wires |
+| --- | --- | --- | --- |
+| 224 | `0x455243343632365f464143455400000000000000000000000000000000000000` (`ERC4626_FACET`) | `0x1dCA18608c89174181153E786778705b4A0E1a06` | 9 |
+| 225 | `0x50534d5f46414345540000000000000000000000000000000000000000000000` (`PSM_FACET`) | `0xE4A5dAc768a310cc2316f258901b32E499653064` | 11 |
+
+No existing call selector changed. The daily monitor reported the 20 new selectors as issue #12, observed at block 26181973. The `PSM_FACET` wires are identical to Grove's: the same 11 call selectors, delegate selectors and facet.
+
 ## Verification behaviour
 
 `pau-verify.ts` runs ONE `eth_call` to `Controller.getDispatches(bytes4[])` with exactly the
@@ -185,7 +204,7 @@ call selectors present in the transaction, and compares the answer to the frozen
 
 | Case | Condition | Behaviour |
 | --- | --- | --- |
-| verified | every frozen entry matches the chain | The decoding renders. A banner states the entries were verified against the chain this session, and names the frozen block. |
+| verified | every frozen entry matches the chain | The decoding renders. No banner renders. |
 | unavailable | no RPC, no network, a malformed answer, or a wrong-length answer | The decoding renders. A banner states the table was frozen at block N on DATE and was not verified this session, and names the read that settles it. |
 | mismatch | at least one frozen entry differs | The decoding is **withheld**. A high-risk block states that the on-chain mapping differs, shows the frozen and on-chain facet and delegate selector in full, and shows the raw calldata. |
 
@@ -228,6 +247,34 @@ Live values read through Grove's wired `getMaxSlippage` call selector `0xa91abea
 `999000000000000000`. Every other address returns `0`, because the mapping is keyed by pool
 rather than by token and only that pool is configured.
 
+## Max exchange rate
+
+`ERC4626Facet.setMaxExchangeRate(address token, uint256 shares, uint256 maxExpectedAssets)` moves no funds. It stores one value per vault. The two numeric arguments are not stored.
+
+Source: `lib/diamond-pau/src/facets/erc4626/ERC4626Facet.sol`, verified on Sourcify for `0x1dCA18608c89174181153E786778705b4A0E1a06`.
+
+| Fact | Source |
+| --- | --- |
+| The stored value is `EXCHANGE_RATE_PRECISION * maxExpectedAssets / shares`, rounded down | lines 84-86, 217-225 |
+| `EXCHANGE_RATE_PRECISION` is `1e36` | line 66 |
+| `maxExpectedAssets` 0 stores 0, before `shares` is checked | lines 218-219 |
+| `shares` 0 with a non-zero `maxExpectedAssets` reverts with `ERC4626Facet/zero-shares` | line 222 |
+| `deposit` requires `1e36 * amount / sharesReceived` to be at most the stored value | lines 120-123 |
+| `withdraw` and `redeem` do not read it | lines 132-187 |
+| The caller must hold `DEFAULT_ADMIN_ROLE`, not `ALLOCATOR_ROLE` | line 80 |
+| An unset vault reads 0 | `IERC4626Facet.sol` line 120 |
+
+Two readings of the stored value fail.
+
+- The value counts raw asset units per raw share unit, times 1e36. It equals 1e36 at one asset per share only when the vault and its asset have the same decimals. The vault `0x802148D518A6De2aF866f9A61ffB5e5C39156dB2` has 18-decimal shares over USDC (6 decimals). One USDC per share is `1e36 * 1e6 / 1e18 = 1e24`.
+- A stored 0 is not "no cap". A deposit with a non-zero computed rate reverts, so 0 blocks deposits into that vault.
+
+The decoder renders the arguments as decoded and states the stored value in full: `Stores a max exchange rate of 1e36 * maxExpectedAssets / shares = N, rounded down.` It warns on `maxExpectedAssets` 0 and on `shares` 0.
+
+Live value read through the second Controller's wired `getMaxExchangeRate` call selector `0x9d6e4747` on 2026-10-16: vault `0x802148D518A6De2aF866f9A61ffB5e5C39156dB2` returns `2000000000000000000000000`, which is 2 USDC per share. It was set in the wiring transaction `0x8d5df19c9ba9da856ac5cf7ff7455ba898a077615145b69f2fb0b08ee5be02d4` (event `ERC4626MaxExchangeRateSet`).
+
+The AdministeredAgent holds `ALLOCATOR_ROLE` only (see **The second Controller**). A `setMaxExchangeRate` sent through it reverts unless the agent is given `DEFAULT_ADMIN_ROLE`. The decoder still decodes it, and the function note names the required role.
+
 ## Amount denomination
 
 Amounts are denominated by the facet function, not by the call target. A denomination is
@@ -242,16 +289,26 @@ signature, because facet function names collide.
 | `PSMFacet.swapUSDSToUSDC(uint256)` | USDC, 6 | parameter is `usdcAmount` |
 | `BasinFacet.deposit(address,address,uint256,uint256)` | parameter 1 | `amount` counts units of `asset` |
 | `BasinFacet.withdraw(address,address,uint256,uint256)` | parameter 1 | `maxAmount` counts units of `asset` |
+| `ERC4626Facet.deposit(address,uint256,uint256)` | parameter 0 | `minSharesOut` counts shares of the vault `token` |
+| `ERC4626Facet.withdraw(address,uint256,uint256)` | parameter 0 | `maxSharesIn` counts shares of the vault `token` |
+| `ERC4626Facet.redeem(address,uint256,uint256)` | parameter 0 | `shares` counts shares of the vault `token` |
+| `ERC4626Facet.setMaxExchangeRate(address,uint256,uint256)` | parameter 0 | `shares` counts shares of the vault `token` |
 
 The two Basin entries denominate against **parameter 1**, which is `asset`. Parameter 0 is the
 Basin. The signature is `deposit(address basin, address asset, uint256 amount, uint256
 minSharesOut)`.
+
+The four ERC4626Facet entries denominate share amounts against **parameter 0**, which is the vault. The facet measures shares as the change in `IERC20Like(token).balanceOf(proxy)` (`ERC4626Facet.sol` lines 111-118 and 143-155), so a share counts units of the vault's own ERC-20 token. A vault in `CONTRACTS_BY_NETWORK` scales: sUSDS `0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD` renders as `N = X sUSDS`. The vault in the observed transactions, `0x802148D518A6De2aF866f9A61ffB5e5C39156dB2`, is not in the registry, so its share amounts render as bare integers with a note that names it.
+
+`PSMFacet.swapUSDSToUSDC` takes the USDC received, not the USDS spent. The facet spends `usdcAmount * to18ConversionFactor()` USDS (`PSMFacet.sol` line 102, `IPSMFacet.sol` line 42). A function note states this. `to18ConversionFactor()`, read through the second Controller's call selector `0xa50e742a` on 2026-10-16, returns `1000000000000`.
 
 The USDS and USDC addresses were read from the Grove Controller's own wired views on
 2026-08-20: `usds()` at call selector `0x3ca47c53` returns
 `0xdC035D45d973E3EC169d2276DDab16f1e407384F`, and `usdc()` at call selector `0xca222cae`
 returns `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`. Decimals come from
 `CONTRACTS_BY_NETWORK`, never from a chain call.
+
+The second Controller returns the same two addresses on 2026-10-16: `usdc()` at call selector `0xca222cae` and `usds()` at call selector `0x2b245db3`, both on the same PSMFacet.
 
 Every other numeric parameter renders as a bare integer, which keeps the decimals picker in
 the UI live. This matches the rule documented in
@@ -270,6 +327,10 @@ Those carry the caveat "the scale is undetermined". The caveat lands only there,
 | `BasinFacet.withdraw` | `minConversionRate` | is a rate, not an amount |
 | `AaveFacet.deposit` | `amount` | counts units of an aToken, and no aToken is in the contract registry |
 | `AaveFacet.withdraw` | `amount` | counts units of an aToken, and no aToken is in the contract registry |
+| `ERC4626Facet.deposit` | `amount` | counts units of the vault asset, `token.asset()`, which the calldata does not name |
+| `ERC4626Facet.withdraw` | `amount` | counts units of the vault asset |
+| `ERC4626Facet.redeem` | `minAssetsOut` | counts units of the vault asset |
+| `ERC4626Facet.setMaxExchangeRate` | `maxExpectedAssets` | counts units of the vault asset |
 
 `UniswapV3Facet.addLiquidity` and `removeLiquidity` carry their amounts inside `TokenAmounts`
 tuples. Those render as tuples with every component in full and are not scaled: `amount0` and
@@ -307,6 +368,7 @@ Other rules:
   are named in one line under the context bullets, not by repeating the argument list.
 - Every nested call's warnings are lifted onto the batch, because the UI renders a batch's
   warning list and not a nested call's.
+- `call` renders as a batch of one with no parameter rows. Its ETH value bullet names the value sent to the agent instead of a number, because `call` forwards `msg.value` and the calldata does not carry it.
 
 ### The frozen-table caveat
 
@@ -320,7 +382,9 @@ Its opening words are the exported constant `PAU_FROZEN_TABLE_CAVEAT_PREFIX`, an
 | Surface | Behaviour |
 | --- | --- |
 | CLI | shows the caveat. It makes no network calls, so nothing else reports freshness. |
-| Web UI | filters the caveat out. Its verification banner reports freshness in all three states, and the caveat left beside a green banner would contradict it. |
+| Web UI | filters the caveat out. The live check reports freshness: a verified result renders nothing, and the other two states render a banner. |
+
+A MultiSend that carries several `call`s to the agent is several decodings, one per entry. The CLI prints the caveat once for each entry.
 
 ## What the decoder does not do
 
@@ -338,7 +402,7 @@ cover, shows the full calldata, and sets `riskLevel: 'high'`.
 **It does not decode a call selector absent from the table.** Same treatment, plus the frozen
 block, plus the `getDispatch` read that settles it.
 
-**It does not decode `AdministeredAgent.call`.** See **Supported functions**.
+**It does not check roles.** A call the facet restricts to `DEFAULT_ADMIN_ROLE` still decodes through the agent, which holds `ALLOCATOR_ROLE` only. For `setMaxExchangeRate` the function note names the required role. The role gates of the other facets were not read for this.
 
 ## Security properties
 
@@ -374,6 +438,24 @@ Register a new AdministeredAgent by adding an entry to `PAU_ADMINISTERED_AGENTS`
 `pau-agent.ts`. The dispatch tables are shared across agents: a table is selected by the
 Controller address in the calldata, not by which agent forwarded the call.
 
+### Last regeneration
+
+Regenerated at block 26207731 on 2026-10-16, after issue #12. The previous table was frozen at block 25798552 on 2026-08-20. Every field of every entry was compared.
+
+| Controller | Wires before | Wires after | Added | Changed | Removed |
+| --- | --- | --- | --- | --- | --- |
+| `0xbf83F5974B932c7D842254042717D6A2706CE5eE` | 47 | 47 | 0 | 0 | 0 |
+| `0x24169Afb34fAe4D4356BC54Bd80319131e35ca38` | 15 | 35 | 20 | 0 | 0 |
+
+The 20 added wires are the `PSM_FACET` and `ERC4626_FACET` integrations listed under **Rewiring frequency**. `--check` against the chain at block 26207733 then reported 0 added, 0 changed, 0 removed.
+
+Both new facets are verified on Sourcify as a partial match (`match`, not `exact_match`), for creation and runtime bytecode, compiler `0.8.34+commit.80d5c536`. A partial match proves the bytecode. It does not prove that the source comments and file paths are the originals. Every delegate selector resolved against the verified ABI, so no wire was omitted.
+
+| Facet | Address | Contract | Deployed |
+| --- | --- | --- | --- |
+| `PSMFacet` | `0xE4A5dAc768a310cc2316f258901b32E499653064` | `lib/diamond-pau/src/facets/psm/PSMFacet.sol:PSMFacet` | block 25235515, transaction `0x42b747111336792761dc45daecb8cc8fd904a1daf349316e6b9011e85585b17c` |
+| `ERC4626Facet` | `0x1dCA18608c89174181153E786778705b4A0E1a06` | `lib/diamond-pau/src/facets/erc4626/ERC4626Facet.sol:ERC4626Facet` | block 25235515, transaction `0x83a10561ff4b10b299038d6ddf3013b9964e0edc7b2d7cf20041e412cb3ea3eb` |
+
 ## The monitor
 
 `.github/workflows/pau-dispatch.yml` runs daily and on manual dispatch. It regenerates the map
@@ -408,7 +490,7 @@ the other six Controllers are dormant after setup and are not covered.
 | Controller | Wires frozen | Facets |
 | --- | --- | --- |
 | `0xbf83F5974B932c7D842254042717D6A2706CE5eE` | 47 | `BasinFacet`, `PSMFacet`, `UniswapV3Facet`, `USDSFacet` |
-| `0x24169Afb34fAe4D4356BC54Bd80319131e35ca38` | 15 | `AaveFacet`, `USDSFacet` |
+| `0x24169Afb34fAe4D4356BC54Bd80319131e35ca38` | 35 | `AaveFacet`, `ERC4626Facet`, `PSMFacet`, `USDSFacet` |
 
 State-changing wires on Grove's Controller:
 
@@ -443,6 +525,14 @@ State-changing wires on Controller `0x24169Afb34fAe4D4356BC54Bd80319131e35ca38`:
 | `USDS_FACET` | `0xa5b7e02d` | `0xa0712d68` | `mint(uint256)` |
 | `USDS_FACET` | `0x48d63a13` | `0x42966c68` | `burn(uint256)` |
 | `USDS_FACET` | `0xbc4bf322` | `0x6817031b` | `setVault(address)` |
+| `PSM_FACET` | `0x8c88adef` | `0x115c48d5` | `swapUSDCToUSDS(uint256)` |
+| `PSM_FACET` | `0x3f45168c` | `0x5acb7053` | `swapUSDSToUSDC(uint256)` |
+| `ERC4626_FACET` | `0xfc78974a` | `0x0efe6a8b` | `deposit(address,uint256,uint256)` |
+| `ERC4626_FACET` | `0xd04771b8` | `0xb5c5f672` | `withdraw(address,uint256,uint256)` |
+| `ERC4626_FACET` | `0xe7accdce` | `0x2b83cccd` | `redeem(address,uint256,uint256)` |
+| `ERC4626_FACET` | `0xa3124407` | `0x7011df99` | `setMaxExchangeRate(address,uint256,uint256)` |
+
+The remaining 23 wires on this Controller are views and pure functions.
 
 `0x73d76dbe` is the delegate selector of `setMaxSlippage(address,uint256)` on both
 `UniswapV3Facet` and `AaveFacet`. The call selectors differ, and so do the facets.
@@ -468,6 +558,14 @@ recorded `safeTxHash`, and the app reports that rather than faking a pass.
 `pau-agent.test.ts` reads these fixture files directly, so a fixture that stops decoding fails
 the test suite rather than only looking wrong in a browser.
 
+The PSM and ERC-4626 tests for the second Controller use the real Controller calldata of nonces 22, 23 and 24 of Safe `0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26`, inline in `pau-agent.test.ts`. They decode it through `batchCall` and through `call`. `swapUSDCToUSDS` and `setMaxExchangeRate` have no executed transaction yet, so their calldata is built from the facet ABI.
+
+| Nonce | safeTxHash | Calls | On-chain transaction |
+| --- | --- | --- | --- |
+| 22 | `0x258d719cff23b4c21250933e471645f28e1c8ed8d10cb3692c16e4c30b8163e9` | `mint`, `swapUSDSToUSDC`, `deposit`, each through `call` in a MultiSend | `0x0c7bc66495352a4f9789c3e8a2dc12a0ab67e6f87e43587b0c674ba4d178e04f` |
+| 23 | `0xf3f4dac699606e56bfb467feb0f06fe9560e6060dc84d464554d19eb69903dfe` | `withdraw` through `call` | `0xc4eb6066f737e4447321579132aac8b6ddd33ab78c0f06059bb5a131f7d7661b` |
+| 24 | `0xb361e998b3b5c25c2c536f83ad558efdb2d24e1209a50b06d26c0a5e4aba4fda` | `redeem` through `call` | `0xc947abb97ae0f6ab62b8e8c3cd7531c36429ae86b4f880dfbb7ade191d542dc1` |
+
 The mismatch path is tested against a synthetic `getDispatches` answer, not against altered
 argument bytes. Altered arguments would produce a canonical call that still round-trips and
 still resolves to the same function, which tests nothing. The failure this check exists for is
@@ -476,11 +574,10 @@ a rewired selector.
 ## What is not determined
 
 - **Whether call selectors have recoverable names.** No naming scheme was tested against them.
-- **Who operates the two allocator Safes.** Only that these two addresses originate the calls.
+- **Who operates the allocator Safes.** Only that Safes `0x9187807e07112359C481870feB58f0c117a29179` and `0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26` originate the calls, and that Safe `0x29c5A20A49A0D522A3714af97C517a908946b6A8` is an actor that has not called the agent.
+- **What vault `0x802148D518A6De2aF866f9A61ffB5e5C39156dB2` is.** Its `name()` returns "Osero x Gauntlet USDC Prime", `symbol()` returns "ogusdcp", `decimals()` returns 18 and `asset()` returns USDC. It is not verified on Sourcify.
 - **Which sub-DAO owns Controller `0x24169Afb34fAe4D4356BC54Bd80319131e35ca38`.**
 - **Whether remapping is prevented anywhere in the contracts.** Absence over eleven weeks was
   measured. The code paths were not audited to establish whether a remap is prevented or
   merely unexercised.
-- **The Safe Transaction Service's own decoding behaviour for these selectors.** No decoded
-  data is expected, because the selectors are per-deployment and absent from any published
-  ABI, but this was inferred from a fixture render rather than queried.
+- **The Safe Transaction Service's decoding of other AdministeredAgents.** It was queried for Safe `0x3dE688267Cf099307aBdd85F64D8efe03D0b2b26` on 2026-10-16 only. It returns `dataDecoded: null` for `batchCall` (nonce 1). It decodes `call(address,bytes)` and leaves the Controller call as `bytes` (nonces 22 to 25).
