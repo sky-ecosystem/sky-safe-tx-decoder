@@ -232,6 +232,7 @@ export class PAUAdministeredAgentDecoder implements CustomDecoder {
       // distrust the display. It stays out of generalWarnings, which the UI
       // renders as "decoder verification failed". See spbeam.ts.
       main.warnings = [...(main.warnings ?? []), ...reencode.warnings]
+      main.trailingCalldata = reencode.trailing
       if (main.riskLevel !== 'high') main.riskLevel = 'medium'
       return {
         main,
@@ -580,6 +581,9 @@ export class PAUAdministeredAgentDecoder implements CustomDecoder {
       parameters,
       target: controller,
       rawCalldata: data,
+      // Trailing bytes inside the forwarded call. The outer call re-encodes
+      // exactly in that case, so only this call can carry the signal.
+      ...(reencode.status === 'trailing' ? { trailingCalldata: reencode.trailing } : {}),
       explanation:
         context +
         (note ? `\n${note}\n` : '') +

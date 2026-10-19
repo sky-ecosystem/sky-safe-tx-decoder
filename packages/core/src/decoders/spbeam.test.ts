@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Hex } from 'viem';
 import { SPBEAMDecoder } from './spbeam.js';
+import { isCallFullyDecoded } from '../utils/forwarded-calls.js';
 
 const SPBEAM_ADDRESS = '0x36B072ed8AFE665E3Aa6DaBa79Decbec63752b22';
 
@@ -129,6 +130,15 @@ describe('SPBEAMDecoder', () => {
 
       expect(warnings).toContain('4 bytes');
       expect(warnings).toContain('0xdeadbeef');
+    });
+
+    it('should mark the trailing bytes, so the CLI withholds its all-clear', () => {
+      const data = (SET_CALLDATA + 'deadbeef') as Hex;
+      const result = decoder.decode(data);
+
+      expect(result.main.trailingCalldata).toBe('0xdeadbeef');
+      expect(isCallFullyDecoded({ data, custom: result, decoded: false })).toBe(false);
+      expect(decoder.decode(SET_CALLDATA).main.trailingCalldata).toBeUndefined();
     });
 
     it('should show the trailing bytes in full', () => {

@@ -83,6 +83,7 @@ export class SPBEAMDecoder implements CustomDecoder {
     // failed". Never downgrade a risk level the function decoder already set.
     if (reencode.status === 'trailing') {
       main.warnings = [...(main.warnings ?? []), ...reencode.warnings]
+      main.trailingCalldata = reencode.trailing
       if (main.riskLevel !== 'high') main.riskLevel = 'medium'
       return { main, isMulticall: false }
     }

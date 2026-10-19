@@ -24,8 +24,10 @@ All notable changes to this project are documented here.
   - a custom decoder rates the call or any of its nested calls high risk, as LockstakeEngine `multicall` does for an unknown nested selector;
   - a Safe API decoding fails the re-encode check, including the outer MultiSend decoding;
   - a call with no custom decoder has a Safe API decoding that could not be checked or has trailing data;
+  - a custom decoder finds bytes past the decoded arguments of the call or of any nested call, including inside the Controller call that `AdministeredAgent.call` forwards. Decoders report this in a new `trailingCalldata` field on each decoded call;
   - the calldata does not parse as a MultiSend batch.
 - **The CLI printed the warning sign twice on decoder warnings that already start with it.**
+- **The LockstakeEngine decoder did not re-encode the calls it decoded.** A call with bytes appended rendered as an ordinary call. Each call and each `multicall` entry is now re-encoded and byte-compared. Trailing bytes add a warning and at least medium risk. A mismatch is high risk.
 
 ## [0.5.0] — 2026-10-05
 

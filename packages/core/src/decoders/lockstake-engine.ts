@@ -8,6 +8,7 @@
 import type { Address, Hex } from 'viem'
 import { decodeFunctionData, parseAbi } from 'viem'
 import type { CustomDecoder, DecodedFunction, DecodedTransactionData } from './types.js'
+import { checkReencode } from './sky-common.js'
 
 /**
  * LockstakeEngine ABI (functions we support)
@@ -116,18 +117,20 @@ export class LockstakeEngineDecoder implements CustomDecoder {
         nestedCalls.push(decoded)
       }
 
+      const main: DecodedFunction = {
+        name: 'multicall',
+        signature: 'multicall(bytes[])',
+        parameters: [{
+          name: 'data',
+          type: 'bytes[]',
+          value: `${encodedCalls.length} calls`,
+        }],
+        explanation: `Batch execution of ${encodedCalls.length} function call(s) in a single transaction.`,
+        riskLevel: 'none',
+      }
+
       return {
-        main: {
-          name: 'multicall',
-          signature: 'multicall(bytes[])',
-          parameters: [{
-            name: 'data',
-            type: 'bytes[]',
-            value: `${encodedCalls.length} calls`,
-          }],
-          explanation: `Batch execution of ${encodedCalls.length} function call(s) in a single transaction.`,
-          riskLevel: 'none',
-        },
+        main: applyReencodeCheck(main, 'multicall', decoded.args, data),
         nested: nestedCalls,
         isMulticall: true,
       }
@@ -152,34 +155,7 @@ export class LockstakeEngineDecoder implements CustomDecoder {
         throw new Error(`No arguments found for function ${functionName}`)
       }
 
-      switch (functionName) {
-        case 'lock':
-          return this.decodeLock(args)
-        case 'free':
-          return this.decodeFree(args)
-        case 'freeNoFee':
-          return this.decodeFreeNoFee(args)
-        case 'draw':
-          return this.decodeDraw(args)
-        case 'wipe':
-          return this.decodeWipe(args)
-        case 'wipeAll':
-          return this.decodeWipeAll(args)
-        case 'open':
-          return this.decodeOpen(args)
-        case 'hope':
-          return this.decodeHope(args)
-        case 'nope':
-          return this.decodeNope(args)
-        case 'selectVoteDelegate':
-          return this.decodeSelectVoteDelegate(args)
-        case 'selectFarm':
-          return this.decodeSelectFarm(args)
-        case 'getReward':
-          return this.decodeGetReward(args)
-        default:
-          return this.decodeUnsupported(functionName, args)
-      }
+      return applyReencodeCheck(this.decodeKnown(functionName, args), functionName, args, data)
     } catch (error) {
       // Function not in our ABI - warn about it
       return {
@@ -190,6 +166,40 @@ export class LockstakeEngineDecoder implements CustomDecoder {
         warnings: ['This function is not in the supported LockstakeEngine function list.'],
         riskLevel: 'high',
       }
+    }
+  }
+
+  /**
+   * Dispatch one decoded call to its describer
+   */
+  private decodeKnown(functionName: string, args: readonly unknown[]): DecodedFunction {
+    switch (functionName) {
+      case 'lock':
+        return this.decodeLock(args)
+      case 'free':
+        return this.decodeFree(args)
+      case 'freeNoFee':
+        return this.decodeFreeNoFee(args)
+      case 'draw':
+        return this.decodeDraw(args)
+      case 'wipe':
+        return this.decodeWipe(args)
+      case 'wipeAll':
+        return this.decodeWipeAll(args)
+      case 'open':
+        return this.decodeOpen(args)
+      case 'hope':
+        return this.decodeHope(args)
+      case 'nope':
+        return this.decodeNope(args)
+      case 'selectVoteDelegate':
+        return this.decodeSelectVoteDelegate(args)
+      case 'selectFarm':
+        return this.decodeSelectFarm(args)
+      case 'getReward':
+        return this.decodeGetReward(args)
+      default:
+        return this.decodeUnsupported(functionName, args)
     }
   }
 
@@ -484,4 +494,32 @@ export class LockstakeEngineDecoder implements CustomDecoder {
     return `${usds.toLocaleString()} USDS`
   }
 
+}
+
+/**
+ * Re-encode a decoded call and byte-compare it against the raw calldata.
+ *
+ * viem's decoder ignores bytes past the end of the encoded arguments, so
+ * without this check a call with appended bytes renders as an ordinary call.
+ * Trailing bytes leave the parameters correct: they get a warning, the
+ * `trailingCalldata` signal and at least medium risk. A mismatch, or a check
+ * that cannot run, means the display is not the bytes being signed, so it is
+ * high risk.
+ */
+function applyReencodeCheck(
+  fn: DecodedFunction,
+  functionName: string,
+  args: readonly unknown[],
+  data: Hex
+): DecodedFunction {
+  const reencode = checkReencode(LOCKSTAKE_ENGINE_ABI, functionName, args, data)
+  if (reencode.status === 'exact') return fn
+  fn.warnings = [...(fn.warnings ?? []), ...reencode.warnings]
+  if (reencode.status === 'trailing') {
+    fn.trailingCalldata = reencode.trailing
+    if (fn.riskLevel !== 'high') fn.riskLevel = 'medium'
+  } else {
+    fn.riskLevel = 'high'
+  }
+  return fn
 }

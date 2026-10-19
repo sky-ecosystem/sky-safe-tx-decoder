@@ -330,6 +330,13 @@ export function findForwardedCalls(parameters: readonly DecodedParam[] | null | 
     }))
 }
 
+/** The fields of one custom-decoded call that isCallFullyDecoded reads. */
+interface CustomCallSummary {
+  riskLevel?: string
+  /** Bytes past the decoded arguments. See DecodedFunction.trailingCalldata. */
+  trailingCalldata?: string
+}
+
 /**
  * Whether one call is decoded down to what executes.
  *
@@ -340,6 +347,9 @@ export function findForwardedCalls(parameters: readonly DecodedParam[] | null | 
  *   decoder decoded the call;
  * - a custom decoder decoded it but rated the main call or any nested call
  *   high risk, which is how a decoder reports a call it cannot name;
+ * - a custom decoder found bytes past the decoded arguments of the main call
+ *   or any nested call (`trailingCalldata`). The display then does not cover
+ *   every byte being signed;
  * - no custom decoder decoded it and no usable one-layer decoding exists;
  * - no custom decoder decoded it and the one-layer decoding did not re-encode
  *   exactly (`trailing-data` or `unverifiable`). The decoding then does not
@@ -353,7 +363,7 @@ export function findForwardedCalls(parameters: readonly DecodedParam[] | null | 
 export function isCallFullyDecoded(call: {
   data: string | null | undefined
   /** The custom decoder's result, when one decoded the call. */
-  custom?: { main: { riskLevel?: string }; nested?: ReadonlyArray<{ riskLevel?: string }> } | null
+  custom?: { main: CustomCallSummary; nested?: ReadonlyArray<CustomCallSummary> } | null
   /** The one-layer decoding's parameters (Safe API or Sourcify), when one exists. */
   parameters?: readonly DecodedParam[] | null
   /** True when a one-layer decoding exists. */
@@ -364,8 +374,8 @@ export function isCallFullyDecoded(call: {
   if (!call.data || call.data === '0x') return true
   if (call.verification?.status === 'mismatch') return false
   if (call.custom) {
-    if (call.custom.main.riskLevel === 'high') return false
-    return !(call.custom.nested ?? []).some(n => n.riskLevel === 'high')
+    const calls = [call.custom.main, ...(call.custom.nested ?? [])]
+    return !calls.some(c => c.riskLevel === 'high' || c.trailingCalldata !== undefined)
   }
   if (!call.decoded) return false
   if (call.verification && call.verification.status !== 'verified') return false

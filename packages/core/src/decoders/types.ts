@@ -41,6 +41,18 @@ export interface DecodedFunction {
    */
   rawCalldata?: Hex
 
+  /**
+   * The bytes past the end of the decoded arguments, in full, when the
+   * decoder's re-encode check found any. Unset when the call re-encodes
+   * exactly.
+   *
+   * Solidity ignores these bytes, so the decoded parameters stay correct, but
+   * the display does not cover every byte being signed. This is the structured
+   * signal: a caller reads it, never the warning text. isCallFullyDecoded
+   * treats it as not fully decoded.
+   */
+  trailingCalldata?: Hex
+
   /** Warnings specific to this function */
   warnings?: string[]
 

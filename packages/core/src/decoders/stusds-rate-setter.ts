@@ -68,6 +68,7 @@ export class StUsdsRateSetterDecoder implements CustomDecoder {
     // as a warning rather than a decoder-verification failure. See spbeam.ts.
     if (reencode.status === 'trailing') {
       main.warnings = [...(main.warnings ?? []), ...reencode.warnings]
+      main.trailingCalldata = reencode.trailing
       if (main.riskLevel !== 'high') main.riskLevel = 'medium'
       return { main, isMulticall: false }
     }

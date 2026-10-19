@@ -256,6 +256,19 @@ describe('isCallFullyDecoded', () => {
     ).toBe(false);
   });
 
+  it('is false when a custom decoder marks trailing bytes on the main call or a nested call', () => {
+    expect(
+      isCallFullyDecoded({ data, decoded: true, custom: { main: { riskLevel: 'medium', trailingCalldata: '0xff' } } })
+    ).toBe(false);
+    expect(
+      isCallFullyDecoded({
+        data,
+        decoded: true,
+        custom: { main: { riskLevel: 'medium' }, nested: [{ riskLevel: 'medium', trailingCalldata: '0xff' }] },
+      })
+    ).toBe(false);
+  });
+
   it('is true when every nested call of a custom decoding is below high risk', () => {
     expect(
       isCallFullyDecoded({

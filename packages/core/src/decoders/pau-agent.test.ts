@@ -21,6 +21,7 @@ import { encodeAbiParameters, encodeFunctionData, parseAbi } from 'viem';
 import { decodeMultiSend } from '../security/multisend-decoder.js';
 import { PAUAdministeredAgentDecoder, createPauAgentDecoders } from './pau-agent.js';
 import { isPauFrozenTableCaveat } from './pau-common.js';
+import { isCallFullyDecoded } from '../utils/forwarded-calls.js';
 
 const GROVE_AGENT = '0xdBD17832df0e57b1732cE1C84c652E820e549BAa';
 const GROVE_CONTROLLER = '0xbf83F5974B932c7D842254042717D6A2706CE5eE';
@@ -773,6 +774,31 @@ describe('AdministeredAgent.call', () => {
     const decoded = second.decode((REAL_NONCE_23 + 'deadbeef') as Hex);
     expect(decoded.main.warnings!.join('\n')).toMatch(/Extra|trailing/i);
     expect(decoded.main.riskLevel).toBe('medium');
+  });
+
+  it('marks trailing bytes on the outer call, so the CLI withholds its all-clear', () => {
+    const data = (REAL_NONCE_23 + 'deadbeef') as Hex;
+    const decoded = second.decode(data);
+    expect(decoded.main.trailingCalldata).toBe('0xdeadbeef');
+    expect(isCallFullyDecoded({ data, custom: decoded, decoded: false })).toBe(false);
+  });
+
+  it('marks trailing bytes inside the forwarded Controller call (review probe case 8)', () => {
+    // mint(1000000000000000000000000) with one 0xff byte appended. The outer
+    // call re-encodes exactly, because the extra byte is inside `data`.
+    const mint = '0xa5b7e02d00000000000000000000000000000000000000000000d3c21bcecceda1000000';
+    const data = encodeFunctionData({ abi: CALL_ABI, functionName: 'call', args: [SECOND_CONTROLLER, `${mint}ff`] });
+    const decoded = second.decode(data);
+    expect(decoded.main.trailingCalldata).toBeUndefined();
+    expect(decoded.nested![0]!.trailingCalldata).toBe('0xff');
+    expect(isCallFullyDecoded({ data, custom: decoded, decoded: false })).toBe(false);
+  });
+
+  it('leaves real nonce 23 unmarked', () => {
+    const decoded = second.decode(REAL_NONCE_23);
+    expect(decoded.main.trailingCalldata).toBeUndefined();
+    expect(decoded.nested!.every(call => call.trailingCalldata === undefined)).toBe(true);
+    expect(isCallFullyDecoded({ data: REAL_NONCE_23, custom: decoded, decoded: false })).toBe(true);
   });
 });
 
