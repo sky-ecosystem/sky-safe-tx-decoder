@@ -2,7 +2,9 @@
 
 All notable changes to this project are documented here.
 
-## [Unreleased]
+## [0.6.0] — 2026-10-19
+
+A page to paste and check a transaction before it is proposed, decoding of the PSM and ERC-4626 facets and of `AdministeredAgent.call`, and a CLI that no longer prints an all-clear under a call it has not decoded and verified.
 
 ### Added
 
