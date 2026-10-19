@@ -435,8 +435,8 @@ export default function ProposeTransaction() {
                 />
               )}
               {field === 'nonce' && nonceCheck?.used && (
-                <p className="mt-2 text-sm text-red-900 bg-red-50 border border-red-400 rounded p-2">
-                  This nonce is already used. The transaction cannot execute.
+                <p className="mt-2 text-sm text-orange-800 bg-orange-50 border border-orange-300 rounded p-2">
+                  Nonce already used.
                 </p>
               )}
               {field === 'nonce' && nonceCheck?.queued && (
