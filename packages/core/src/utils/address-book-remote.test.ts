@@ -8,7 +8,10 @@ import { describe, it, expect } from 'vitest';
 import {
   buildMergedTag,
   checkRemoteAddressBookUrl,
+  LABEL_CHANGE_NOTE_WINDOW_MS,
+  labelChangeNote,
   mergeAddressBooks,
+  parseLastChangedAt,
   parseRemoteAddressBook,
   parseSkySafeConfig,
   resolveAddressBookPageUrl,
@@ -371,5 +374,119 @@ describe('resolveAddressBookPageUrl', () => {
 
   it('returns null when the page is not http or https', () => {
     expect(resolveAddressBookPageUrl('/', 'file:///Users/me/index.html')).toBeNull();
+  });
+});
+
+describe('last_changed_at', () => {
+  const NOW = new Date('2026-09-17T10:00:00.000Z');
+
+  it('carries a valid value onto the entry and the merged tag', () => {
+    const result = parseRemoteAddressBook(body([remoteRow({ last_changed_at: '2026-09-16T14:02:51.118Z' })]), {
+      now: NOW,
+    });
+    expect(result.skipped).toHaveLength(0);
+    expect(result.entries[0]!.lastChangedAt).toBe('2026-09-16T14:02:51.118Z');
+    expect(buildMergedTag(result.entries[0]!).lastChangedAt).toBe('2026-09-16T14:02:51.118Z');
+  });
+
+  it('accepts a value without fractional seconds', () => {
+    expect(parseLastChangedAt('2026-09-16T14:02:51Z', NOW)).toBe('2026-09-16T14:02:51Z');
+  });
+
+  it('leaves the field absent when the row has none', () => {
+    const result = parseRemoteAddressBook(body([remoteRow()]), { now: NOW });
+    expect(result.entries[0]).not.toHaveProperty('lastChangedAt');
+    expect(buildMergedTag(result.entries[0]!)).not.toHaveProperty('lastChangedAt');
+  });
+
+  it.each([
+    ['a number', 1757944971118],
+    ['an empty string', ''],
+    ['a date only', '2026-09-16'],
+    ['no time zone', '2026-09-16T14:02:51'],
+    ['an offset', '2026-09-16T14:02:51+00:00'],
+    ['a lower-case z', '2026-09-16T14:02:51z'],
+    ['a space separator', '2026-09-16 14:02:51Z'],
+    ['an impossible date', '2026-02-30T10:00:00Z'],
+    ['an impossible hour', '2026-09-16T24:00:00Z'],
+    ['surrounding whitespace', ' 2026-09-16T14:02:51Z'],
+    ['free text', 'yesterday'],
+  ])('ignores %s and keeps the entry', (_name, value) => {
+    const result = parseRemoteAddressBook(body([remoteRow({ last_changed_at: value })]), { now: NOW });
+    expect(result.skipped).toHaveLength(0);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]!.label).toBe('USDS token');
+    expect(result.entries[0]).not.toHaveProperty('lastChangedAt');
+  });
+
+  it('accepts a value up to five minutes in the future and ignores one further ahead', () => {
+    expect(parseLastChangedAt('2026-09-17T10:05:00.000Z', NOW)).toBe('2026-09-17T10:05:00.000Z');
+    expect(parseLastChangedAt('2026-09-17T10:05:00.001Z', NOW)).toBeNull();
+    const result = parseRemoteAddressBook(body([remoteRow({ last_changed_at: '2026-09-18T10:00:00Z' })]), { now: NOW });
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]).not.toHaveProperty('lastChangedAt');
+  });
+
+  it('ignores a bad value on one row without affecting the others', () => {
+    const result = parseRemoteAddressBook(
+      body([
+        remoteRow({ address: USDS, last_changed_at: 'bad' }),
+        remoteRow({ address: USDT, label: 'Tether', last_changed_at: '2026-09-17T09:00:00Z' }),
+      ]),
+      { now: NOW }
+    );
+    expect(result.skipped).toHaveLength(0);
+    expect(result.entries[0]).not.toHaveProperty('lastChangedAt');
+    expect(result.entries[1]!.lastChangedAt).toBe('2026-09-17T09:00:00Z');
+  });
+
+  it('keeps the remote value through a merge with a CSV entry', () => {
+    const remote = parseRemoteAddressBook(body([remoteRow({ last_changed_at: '2026-09-17T09:00:00Z' })]), {
+      now: NOW,
+    }).entries;
+    const { entries } = mergeAddressBooks([csvEntry()], remote);
+    expect(entries[0]!.lastChangedAt).toBe('2026-09-17T09:00:00Z');
+  });
+});
+
+describe('labelChangeNote', () => {
+  const NOW = new Date('2026-09-17T10:00:00.000Z');
+  const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const DAY = 24 * HOUR;
+
+  it('returns null with no value or an invalid value', () => {
+    expect(labelChangeNote(undefined, NOW)).toBeNull();
+    expect(labelChangeNote('not a time', NOW)).toBeNull();
+    expect(labelChangeNote('2026-09-18T10:00:00Z', NOW)).toBeNull();
+  });
+
+  it('reads "just now" under a minute, and for a time inside the skew', () => {
+    expect(labelChangeNote(ago(59_999), NOW)).toEqual({ text: 'changed just now', recent: true });
+    expect(labelChangeNote('2026-09-17T10:02:00Z', NOW)).toEqual({ text: 'changed just now', recent: true });
+  });
+
+  it('uses minutes under an hour, hours under a day', () => {
+    expect(labelChangeNote(ago(MIN), NOW)).toEqual({ text: 'changed 1m ago', recent: true });
+    expect(labelChangeNote(ago(59 * MIN), NOW)).toEqual({ text: 'changed 59m ago', recent: true });
+    expect(labelChangeNote(ago(HOUR), NOW)).toEqual({ text: 'changed 1h ago', recent: true });
+    expect(labelChangeNote(ago(3 * HOUR + 59 * MIN), NOW)).toEqual({ text: 'changed 3h ago', recent: true });
+    expect(labelChangeNote(ago(DAY - 1), NOW)).toEqual({ text: 'changed 23h ago', recent: true });
+  });
+
+  it('uses days from 24 hours, and is no longer recent', () => {
+    expect(labelChangeNote(ago(DAY), NOW)).toEqual({ text: 'changed 1d ago', recent: false });
+    expect(labelChangeNote(ago(2 * DAY + 5 * HOUR), NOW)).toEqual({ text: 'changed 2d ago', recent: false });
+    expect(labelChangeNote(ago(LABEL_CHANGE_NOTE_WINDOW_MS - 1), NOW)).toEqual({
+      text: 'changed 6d ago',
+      recent: false,
+    });
+  });
+
+  it('returns null at and beyond the seven-day window', () => {
+    expect(LABEL_CHANGE_NOTE_WINDOW_MS).toBe(7 * DAY);
+    expect(labelChangeNote(ago(LABEL_CHANGE_NOTE_WINDOW_MS), NOW)).toBeNull();
+    expect(labelChangeNote(ago(30 * DAY), NOW)).toBeNull();
   });
 });
