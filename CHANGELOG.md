@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **A remote address book label shows how recently it changed.** The service can send `last_changed_at` on each entry. A label changed in the last 7 days shows "changed 3h ago" or "changed 2d ago", amber in the first 24 hours and muted after that. The exact time is in the tooltip. The note changes no risk level and blocks nothing. An invalid or future value is ignored for that entry only. Core exports `parseLastChangedAt`, `labelChangeNote` and `LABEL_CHANGE_NOTE_WINDOW_MS`.
+
 ## [0.6.0] — 2026-10-19
 
 A page to paste and check a transaction before it is proposed, decoding of the PSM and ERC-4626 facets and of `AdministeredAgent.call`, and a CLI that no longer prints an all-clear under a call it has not decoded and verified.
