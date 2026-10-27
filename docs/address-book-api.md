@@ -50,5 +50,5 @@ Both responses need `Content-Type: application/json` and should carry `Cache-Con
 - The request is sent with same-origin credentials only, so an authenticating proxy in front of the origin works without any token in the tool.
 - Nothing is cached or written to browser storage. Each session fetches the book again.
 - Any failure clears every remote label, shows a red banner naming the cause, and treats every address without a built-in, CSV or My Safes label as unknown until a later fetch succeeds. Retry and a change of network fetch again.
-- A label whose `last_changed_at` is in the last 7 days shows "changed 3h ago" or "changed 2d ago" next to it, with the exact time in the tooltip. The note is amber in the first 24 hours and muted after that. It is informational only: it changes no risk level and blocks nothing.
+- A label whose `last_changed_at` is in the last 7 days shows "changed 3h ago" or "changed 2d ago" next to it, with the exact time in the tooltip. The note is amber in the first 24 hours and muted after that. It is informational only. It does not change the risk level and does not block anything.
 - A CSV address book loaded alongside is merged by address. The service wins; a differing label or status is shown as a conflict on the address.
