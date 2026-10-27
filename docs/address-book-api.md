@@ -25,7 +25,8 @@ A host that answers unknown paths with the app page (SPA fallback) must still an
   "source": { "name": "example-address-book", "generated_at": "2026-09-17T10:00:00Z" },
   "entries": [
     { "address": "0xdC035D45d973E3EC169d2276DDab16f1e407384F", "label": "USDS token",
-      "networks": ["ethereum"], "status": "active", "last_verified": "2026-09-01" }
+      "networks": ["ethereum"], "status": "active", "last_verified": "2026-09-01",
+      "last_changed_at": "2026-09-16T14:02:51.118Z" }
   ]
 }
 ```
@@ -38,6 +39,7 @@ A host that answers unknown paths with the app page (SPA fallback) must still an
 | `entries[].networks` | Network names, or `["all"]` |
 | `entries[].status` | `active` or `inactive`. Inactive entries must be included; the decoder warns on them |
 | `entries[].last_verified` | `YYYY-MM-DD` |
+| `entries[].last_changed_at` | Optional. Time of the latest change to the entry, ISO 8601 in UTC with a `Z` suffix, for example `2026-09-16T14:02:51.118Z`. A value that is not a valid UTC time, or is more than 5 minutes in the future, is ignored for that entry. The entry still loads |
 
 Extra fields are ignored. A row that fails a rule is skipped and counted; the rest of the list loads.
 
@@ -48,4 +50,5 @@ Both responses need `Content-Type: application/json` and should carry `Cache-Con
 - The request is sent with same-origin credentials only, so an authenticating proxy in front of the origin works without any token in the tool.
 - Nothing is cached or written to browser storage. Each session fetches the book again.
 - Any failure clears every remote label, shows a red banner naming the cause, and treats every address without a built-in, CSV or My Safes label as unknown until a later fetch succeeds. Retry and a change of network fetch again.
+- A label whose `last_changed_at` is in the last 7 days shows "changed 3h ago" or "changed 2d ago" next to it, with the exact time in the tooltip. The note is amber in the first 24 hours and muted after that. It is informational only. It does not change the risk level and does not block anything.
 - A CSV address book loaded alongside is merged by address. The service wins; a differing label or status is shown as a conflict on the address.

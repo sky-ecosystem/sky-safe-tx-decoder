@@ -12,9 +12,12 @@
  *     "entries": [
  *       { "id": 1, "address": "0x...", "label": "...", "networks": ["ethereum"],
  *         "status": "active", "last_verified": "2026-09-01",
- *         "updated_at": "<ISO 8601>" }
+ *         "updated_at": "<ISO 8601>", "last_changed_at": "<ISO 8601 UTC>" }
  *     ]
  *   }
+ *
+ * `last_changed_at` is optional. An invalid value is dropped for that entry
+ * only; the entry itself still loads.
  *
  * `networks` may contain "all". A row that is not valid on the requested
  * network is skipped rather than dropped silently, so the UI can report
@@ -43,9 +46,96 @@ export interface RemoteAddressBookResult {
 export interface RemoteAddressBookOptions {
   /** Keep only rows valid on this network (or on "all"). Omit to keep all rows. */
   network?: string;
+  /** Clock for the future-time check on `last_changed_at`. Defaults to now. */
+  now?: Date;
 }
 
 const ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
+
+/**
+ * ISO 8601 in UTC with a `Z` suffix and optional fractional seconds, for
+ * example `2026-09-16T14:02:51.118Z`. Offsets other than `Z` are refused.
+ */
+const UTC_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,9})?Z$/;
+
+/** A `last_changed_at` up to this far ahead of the clock is accepted (clock skew). */
+export const LAST_CHANGED_AT_MAX_SKEW_MS = 5 * 60 * 1000;
+
+/** Milliseconds since the epoch for a valid `last_changed_at`, or null. */
+function lastChangedAtMs(value: unknown, now: Date): number | null {
+  if (typeof value !== 'string') return null;
+  const m = UTC_TIMESTAMP_PATTERN.exec(value);
+  if (!m) return null;
+  const [year, month, day, hour, minute, second] = m.slice(1, 7).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const whole = Date.UTC(year, month - 1, day, hour, minute, second);
+  const d = new Date(whole);
+  // Date.UTC rolls 2026-02-30 over to 2026-03-02. A round trip catches it.
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day ||
+    d.getUTCHours() !== hour ||
+    d.getUTCMinutes() !== minute ||
+    d.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+  const ms = whole + (m[7] ? Math.floor(Number(`0${m[7]}`) * 1000) : 0);
+  if (ms - now.getTime() > LAST_CHANGED_AT_MAX_SKEW_MS) return null;
+  return ms;
+}
+
+/**
+ * Validate a `last_changed_at` value. Returns the value unchanged when it is a
+ * real UTC time no more than {@link LAST_CHANGED_AT_MAX_SKEW_MS} in the
+ * future, and null otherwise. Never throws.
+ */
+export function parseLastChangedAt(value: unknown, now: Date = new Date()): string | null {
+  return lastChangedAtMs(value, now) === null ? null : (value as string);
+}
+
+/** A remote label changed within this window gets a "changed ... ago" note. */
+export const LABEL_CHANGE_NOTE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Within this window the note uses the amber style. */
+export const LABEL_CHANGE_RECENT_MS = 24 * 60 * 60 * 1000;
+
+export interface LabelChangeNote {
+  /** Short text, for example "changed 3h ago". */
+  text: string;
+  /** True within {@link LABEL_CHANGE_RECENT_MS}: show the amber style. */
+  recent: boolean;
+}
+
+/**
+ * The note shown next to a remote label that changed recently, or null when
+ * the change is older than {@link LABEL_CHANGE_NOTE_WINDOW_MS} or the value is
+ * not a valid `last_changed_at`. Informational only.
+ *
+ * A time slightly in the future (inside the accepted skew) reads "just now".
+ */
+export function labelChangeNote(lastChangedAt: string | undefined, now: Date = new Date()): LabelChangeNote | null {
+  const at = lastChangedAtMs(lastChangedAt, now);
+  if (at === null) return null;
+  const age = Math.max(0, now.getTime() - at);
+  if (age >= LABEL_CHANGE_NOTE_WINDOW_MS) return null;
+  const minutes = Math.floor(age / 60_000);
+  const hours = Math.floor(age / 3_600_000);
+  const days = Math.floor(age / 86_400_000);
+  let text: string;
+  if (minutes < 1) text = 'changed just now';
+  else if (hours < 1) text = `changed ${minutes}m ago`;
+  else if (days < 1) text = `changed ${hours}h ago`;
+  else text = `changed ${days}d ago`;
+  return { text, recent: age < LABEL_CHANGE_RECENT_MS };
+}
 
 function str(value: unknown): string {
   return typeof value === 'string' ? value : '';
@@ -67,6 +157,7 @@ export function parseRemoteAddressBook(json: unknown, options: RemoteAddressBook
   const sourceName = typeof source.name === 'string' ? source.name : null;
   const generatedAt = typeof source.generated_at === 'string' ? source.generated_at : null;
 
+  const now = options.now ?? new Date();
   const entries: AddressBookEntry[] = [];
   const skipped: AddressBookSkippedRow[] = [];
   // De-dupe by address (last wins), mirroring parseAddressBookCsv.
@@ -123,6 +214,9 @@ export function parseRemoteAddressBook(json: unknown, options: RemoteAddressBook
       type: 'address',
       origin: 'remote',
     };
+    // Optional and informational. A bad value costs the note, not the entry.
+    const lastChangedAt = parseLastChangedAt(record.last_changed_at, now);
+    if (lastChangedAt !== null) entry.lastChangedAt = lastChangedAt;
     const key = address.toLowerCase();
     const existingIdx = seen.get(key);
     if (existingIdx !== undefined) {
@@ -201,6 +295,7 @@ export function mergeAddressBooks(csv: AddressBookEntry[], remote: AddressBookEn
 export function buildMergedTag(entry: AddressBookEntry, conflict?: AddressBookConflict): AddressTag {
   const tag = buildAddressBookTag(entry);
   if (entry.origin) tag.origin = entry.origin;
+  if (entry.lastChangedAt !== undefined) tag.lastChangedAt = entry.lastChangedAt;
   if (conflict) {
     tag.conflict = {
       otherLabel: conflict.csv.label,

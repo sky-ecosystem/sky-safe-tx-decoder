@@ -13,10 +13,14 @@
  *   - A copy control writes the full value, so the signer never retypes it.
  *   - Provenance is on the badge only when two books are loaded and could
  *     disagree. The source is always in the tooltip.
+ *
+ * A remote label changed in the last seven days carries a short "changed 3h
+ * ago" note. It is informational only: it changes no style or risk state of
+ * the badge itself.
  */
 
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
-import { getAddressTags, toChecksumAddress, type AddressTag } from '@shield3/sky-safe-core';
+import { getAddressTags, labelChangeNote, toChecksumAddress, type AddressTag } from '@shield3/sky-safe-core';
 import { useAddressBook } from '../address-book/AddressBookContext';
 import { useAddressTagsVersion } from '../address-book/useAddressTagsVersion';
 import { useOptionalSafeRoute } from '../safe-route/SafeRouteProvider';
@@ -53,6 +57,29 @@ function sourceName(tag: AddressTag): string {
   if (tag.origin === 'remote') return 'Address book service';
   if (tag.origin === 'csv') return 'CSV address book';
   return 'Address book';
+}
+
+/**
+ * "changed 3h ago" next to a remote label that changed recently. Amber within
+ * 24 hours, muted from 1 to 7 days, nothing after that. The exact time is in
+ * the tooltip.
+ */
+function ChangedNote({ tag }: { tag: AddressTag }) {
+  if (tag.origin !== 'remote') return null;
+  const note = labelChangeNote(tag.lastChangedAt);
+  if (note === null) return null;
+  return (
+    <span
+      className={
+        note.recent
+          ? 'text-xs bg-amber-100 text-amber-900 border border-amber-300 px-1 rounded'
+          : 'text-xs text-gray-500'
+      }
+      title={`Label last changed ${tag.lastChangedAt}`}
+    >
+      {note.text}
+    </span>
+  );
 }
 
 /**
@@ -154,6 +181,7 @@ export function Address({ address, safeAddress, className = '' }: AddressProps) 
           INACTIVE: {book.label}
           {origin(book)}
         </span>
+        <ChangedNote tag={book} />
       </span>
     );
   }
@@ -177,6 +205,7 @@ export function Address({ address, safeAddress, className = '' }: AddressProps) 
         <span className="text-xs bg-amber-300 px-1 rounded font-semibold">
           label conflict: {book.label} (book) vs {book.conflict.otherLabel} (CSV)
         </span>
+        <ChangedNote tag={book} />
       </span>
     );
   }
@@ -198,6 +227,7 @@ export function Address({ address, safeAddress, className = '' }: AddressProps) 
           {book.label}
           {origin(book)}
         </span>
+        <ChangedNote tag={book} />
       </span>
     );
   }
@@ -215,6 +245,7 @@ export function Address({ address, safeAddress, className = '' }: AddressProps) 
           {book.label}
           {origin(book)}
         </span>
+        <ChangedNote tag={book} />
       </span>
     );
   }

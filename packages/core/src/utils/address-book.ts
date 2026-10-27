@@ -50,6 +50,11 @@ export interface AddressBookEntry {
    * existing consumer reads it.
    */
   origin?: AddressBookOrigin;
+  /**
+   * `last_changed_at` from the remote book: ISO 8601 UTC time of the latest
+   * change to the entry. Validated at parse time. Absent on CSV entries.
+   */
+  lastChangedAt?: string;
 }
 
 export interface AddressBookSafe {

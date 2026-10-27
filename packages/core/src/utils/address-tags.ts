@@ -39,6 +39,11 @@ export interface AddressTag {
   /** Which address-book feed produced this tag. Absent for built-ins. */
   origin?: AddressBookOrigin
   /**
+   * ISO 8601 UTC time of the latest change to a remote entry. Informational
+   * only: no check reads it. Absent for CSV entries and built-ins.
+   */
+  lastChangedAt?: string
+  /**
    * Set when the two address-book feeds disagree about this address. The
    * winning feed supplies the tag; this records what the other feed said so
    * the signer can be shown the disagreement instead of a single label they
