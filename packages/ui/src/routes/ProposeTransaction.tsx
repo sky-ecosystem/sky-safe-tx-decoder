@@ -6,8 +6,8 @@
  * analysis as the queued-transaction page, through the same function and the
  * same review component. Only the Safe API record is missing, so:
  *
- * - The Safe API's decoding comes from the service's data decoder, for the
- *   same calldata.
+ * - The Safe API's decoding comes from the Safe Decoder Service, as on the
+ *   queued-transaction page.
  * - Sections that describe a queued record (status, confirmations, timeline,
  *   proposer, the same-nonce selector, the API hash comparison) are not shown.
  *
@@ -142,7 +142,8 @@ export default function ProposeTransaction() {
         if (!Number.isSafeInteger(onchainNonce) || onchainNonce < 0) {
           throw new Error(`The Safe API reported nonce ${String(info.nonce)}, which is not a valid nonce.`);
         }
-        const queued = await client.fetchQueuedTransactions(address, onchainNonce);
+        // Only the nonces are read here, so the decoder is not asked.
+        const queued = await client.fetchQueuedTransactions(address, onchainNonce, { safeInfo: info, decode: false });
         const queuedNonces = [...new Set(queued.map((tx) => Number(tx.nonce)))].sort((a, b) => a - b);
         if (cancelled) return;
         const recommendedNonce = recommendedProposalNonce(onchainNonce, queuedNonces);
@@ -278,7 +279,7 @@ export default function ProposeTransaction() {
     const target = analyzed;
     setLookup({ for: target, state: 'looking' });
     try {
-      const found = await new SafeApiClient(network).fetchTransactionByHash(target.hashes.safeTxHash);
+      const found = await new SafeApiClient(network).fetchTransactionByHash(target.hashes.safeTxHash, address);
       // The fields changed while the lookup ran. Its answer is for hashes no
       // longer on screen.
       if (analyzedRef.current !== target) return;

@@ -38,7 +38,7 @@ No server or environment variables required - all API calls are made client-side
 ## Simulated transactions (development only)
 
 A decoder can only be reviewed against a transaction the app can load, and the app loads
-transactions from the Safe Transaction Service by Safe address and nonce. A contract that
+transactions from the Safe Queue Service by Safe address and nonce. A contract that
 has never been called from a Safe therefore has nothing to inspect, and its decoder cannot
 be seen rendered.
 
@@ -75,7 +75,7 @@ The Paste a transaction page works on the sentinel Safe too:
 http://localhost:5173/#/safe/ethereum/0xfeEDfaCeFeEdFaceFEedFACefEEDFaCEfEeDfAce/propose
 ```
 
-The mock reports on-chain nonce 13, so nonces 0 to 12 count as used, 13 and 14 as queued, and the recommended nonce is 15. It answers the data decoder for a fixture's own calldata with that fixture's `dataDecoded`, or with a `null` body when the fixture has none. Other calldata goes to the real data decoder. To review the state where Safe's decoder does not answer, run `window.__safeApiMockDecoderFailure = 500` (or `429`) in the browser console. Every data decoder request on a sentinel Safe page then fails with that status. Run `delete window.__safeApiMockDecoderFailure` and select Retry to answer again. Paste the JSON built from a fixture's fields to compare proposer mode with that fixture's transaction page.
+The mock serves every fixture from the Safe Queue Service routes, in that service's record shape, so fixtures go through the same adapter as a real Safe. A fixture with a zero safeTxHash gets a placeholder equal to its nonce padded to 32 bytes. The mock reports on-chain nonce 13, so nonces 0 to 12 count as used and show as not executed, 13 and 14 count as queued, and the recommended nonce is 15. It answers the Safe Decoder Service for a fixture's own calldata with that fixture's `dataDecoded`, or with a `null` body when the fixture has none. Other calldata goes to the real Safe Decoder Service. To review the state where Safe's decoder does not answer, run `window.__safeApiMockDecoderFailure = 500` (or `429`) in the browser console. Every Safe Decoder Service request on a sentinel Safe page then fails with that status. Run `delete window.__safeApiMockDecoderFailure` and select Retry to answer again. Paste the JSON built from a fixture's fields to compare proposer mode with that fixture's transaction page.
 
 Nonces 4 and 5 are worth opening back to back. They share a key name and differ by a factor
 of 10^12.

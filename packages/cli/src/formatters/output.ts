@@ -100,8 +100,13 @@ export function printTransactionData(tx: SafeApiMultisigTransaction): void {
     printField('Successful', tx.isSuccessful ? 'Yes' : 'No');
   }
 
-  // Confirmations
-  printField('Confirmations', `${tx.confirmations.length}/${tx.confirmationsRequired}`);
+  // Confirmations. The threshold is the Safe's current one, which can differ
+  // from the threshold at execution, so an executed transaction shows its
+  // count alone.
+  printField(
+    'Confirmations',
+    tx.isExecuted ? String(tx.confirmations.length) : `${tx.confirmations.length}/${tx.confirmationsRequired}`
+  );
 }
 
 /**
@@ -134,6 +139,18 @@ export function printDecodedData(
       printHeader('Decoded Data');
       printField('Method', method);
       printField('Parameters', '[]');
+    } else if (tx.dataDecodedUnavailable !== undefined) {
+      // A Safe Queue Service record does not carry a decoding, and the Safe
+      // Decoder Service did not give one. That is not the same as "no ABI".
+      printHeader('Decoded Data');
+      printField('Method', 'Not decoded');
+      printField('Function selector', tx.data.slice(0, 10));
+      console.log(
+        chalk.yellow(
+          `  The Safe Decoder Service did not answer (${tx.dataDecodedUnavailable}).\n` +
+            '  Verify the raw calldata above independently before signing.'
+        )
+      );
     } else {
       // The Safe API returned no decoded data, which means it has no ABI
       // cached for the target contract. Say that plainly and show the selector
@@ -143,7 +160,7 @@ export function printDecodedData(
       printField('Function selector', tx.data.slice(0, 10));
       console.log(
         chalk.dim(
-          '  No ABI for this contract in the Safe Transaction Service.\n' +
+          '  No ABI for this contract in the Safe Decoder Service.\n' +
             '  Verify the raw calldata above independently before signing.'
         )
       );

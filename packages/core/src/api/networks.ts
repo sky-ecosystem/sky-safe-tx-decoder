@@ -10,6 +10,23 @@ import type { NetworkConfig } from '../types.js'
 const BASE_URL = 'https://api.safe.global/tx-service'
 
 /**
+ * Safe Queue Service base URL. One service for every chain: a request names
+ * the chain with the network's `chainId`, for example
+ * `safes={safe}:{chainId}`. Every transaction this tool reads comes from it.
+ * Safe info comes from the Safe Transaction Service at each network's
+ * `apiUrl`.
+ *
+ * @see https://docs.safe.global/core-api/safe-queue-service-overview
+ */
+export const QUEUE_SERVICE_URL = 'https://api.safe.global/queue'
+
+/**
+ * Safe Decoder Service base URL. One service for every chain: a request names
+ * the chain with `chainId` in the body.
+ */
+export const DECODER_SERVICE_URL = 'https://api.safe.global/decoder'
+
+/**
  * Supported networks mapped to their Safe Transaction Service API URLs and chain IDs
  * Starting with ethereum, can expand to all 40+ networks later
  */

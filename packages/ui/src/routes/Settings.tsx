@@ -439,7 +439,7 @@ export default function Settings() {
           <span className="text-sm">
             <span className="font-semibold">Sourcify ABI fallback</span>
             <span className="block text-gray-600 mt-1">
-              When the Safe Transaction Service returns no decoded data for a call, fetch the contract&apos;s verified
+              When the Safe Decoder Service does not return decoded data for a call, fetch the contract&apos;s verified
               ABI from Sourcify and decode with it, following an EIP-1967 proxy to its implementation when needed. The
               result is re-encoded and byte-compared against the raw calldata before it is shown, the same check applied
               to Safe API decodings.

@@ -8,7 +8,12 @@ Based on [pcaversaccio/safe-tx-hashes-util](https://github.com/pcaversaccio/safe
 
 ## What It Does
 
-1. Fetches transaction data from the [Safe Transaction Service API](https://docs.safe.global/core-api/transaction-service-overview)
+1. Fetches transaction data from Safe's APIs:
+   - Transactions from the [Safe Queue Service](https://docs.safe.global/core-api/safe-queue-service-overview).
+   - Safe info (nonce, threshold, version) from the [Safe Transaction Service](https://docs.safe.global/core-api/transaction-service-overview).
+   - Decodings from the Safe Decoder Service.
+   - Each transaction the Safe Queue Service returns must match the Safe, chain, nonce and safeTxHash that the tool asked for. A mismatch is an error.
+   - The transaction page reads the execution time of an executed transaction from the network's public RPC node.
 2. Calculates EIP-712 hashes (Domain, Message, Safe TX) independently
 3. Verifies the calculated hash matches the API-provided hash
 4. Re-encodes decoded parameters and compares with raw calldata
@@ -55,12 +60,12 @@ pnpm --filter @shield3/sky-safe-ui dev
 
 #### Paste a transaction
 
-The Paste a transaction page checks a transaction before it is in the Safe Transaction Service queue. Open the Safe and select **Paste a transaction**.
+The Paste a transaction page checks a transaction before it is in the Safe Queue Service queue. Open the Safe and select **Paste a transaction**.
 
 - Paste the JSON tab of the pending transaction from the Safe web app, or enter the fields. The Data tab shortens some values. A shortened value is rejected. A pasted JSON must contain all ten keys. A paste with a missing key is rejected.
 - In the fields, the nonce starts at the one the Safe web app proposes. A nonce that is already used or already queued shows a warning.
 - The decoding, security warnings and hashes are the ones signers see for the queued transaction. Compare the safeTxHash with the Hashes tab and your hardware wallet. If they differ, do not sign.
-- The Safe Transaction Service data decoder decodes the calldata. Nothing you enter is stored or put in the URL.
+- The Safe Decoder Service decodes the calldata. Nothing you enter is stored or put in the URL.
 - After you propose, **Find in queue** opens the queued transaction.
 
 #### Offline single-file build
@@ -77,8 +82,8 @@ pnpm --filter @shield3/sky-safe-ui build:offline
 Everything (JS + CSS) is inlined into that one file, so it runs from `file://`
 with no external requests for app code. Audit it once, optionally pin its hash,
 and run it from disk — the verification code is yours, not re-served by a CDN on
-every visit. It still fetches transaction data from the Safe Transaction Service
-API, so an internet connection is required; only the app code is local.
+every visit. It still fetches transaction data from Safe's APIs, so an internet connection is
+required; only the app code is local.
 
 ##### Verifying a release build
 
@@ -253,12 +258,11 @@ Currently included:
 | MultiSend                    | Standard Safe MultiSend                      | Batch transaction decoding                            |
 
 **SPBEAM** sets stability fees and the savings rate within governance-configured bounds.
-The Safe Transaction Service does not decode it. Rate values show basis points and
-percentage; ilk identifiers show their ASCII label alongside the full `bytes32`.
+Rate values show basis points and percentage; ilk identifiers show their ASCII label
+alongside the full `bytes32`.
 
 **StUsdsRateSetter** sets the stUSDS savings rate, ilk duty, debt ceiling and supply cap
-within governance-configured bounds. The Safe Transaction Service holds no ABI for this
-contract at all.
+within governance-configured bounds.
 
 **PAS Configurator** is the cBEAM entry point of the Parallelized Allocation System. It
 moves a Parallelized Allocation Unit's rate limits within governance-set ceilings without a
@@ -270,7 +274,7 @@ the value BeamState authorises on.
 See [`packages/core/src/decoders/PAS.md`](packages/core/src/decoders/PAS.md) for the key
 table, denominations, rendering rules, and scope.
 
-When no decoder covers a contract and the Safe Transaction Service returns nothing, the
+When no decoder covers a contract and the Safe Decoder Service does not return a decoding, the
 Sourcify fallback fetches the contract's verified ABI and decodes with that instead. See
 [Sourcify fallback](#sourcify-fallback) below.
 
@@ -278,7 +282,7 @@ See the [core package README](packages/core/README.md#creating-a-custom-decoder)
 
 ## Sourcify Fallback
 
-Web UI only. When the Safe Transaction Service returns no decoded data and no built-in
+Web UI only. When the Safe Decoder Service does not return decoded data and no built-in
 decoder covers the contract, the app fetches the contract's verified ABI from
 [Sourcify](https://sourcify.dev) and decodes with that.
 
@@ -327,7 +331,7 @@ Users must trust:
 
 - This TypeScript implementation
 - [viem](https://viem.sh) cryptographic library
-- Safe Transaction Service API data — however, the tool independently re-encodes decoded parameters and verifies they match the raw calldata and EIP-712 hashes, so API-provided decoded data is not blindly trusted
+- Safe Queue Service, Safe Transaction Service and Safe Decoder Service API data. The tool checks that each transaction record matches the request, and it independently re-encodes decoded parameters and verifies they match the raw calldata and EIP-712 hashes, so API-provided decoded data is not blindly trusted
 - Hardware wallet secure screen
 
 When the [Sourcify fallback](#sourcify-fallback) is enabled, two further parties are
@@ -360,5 +364,6 @@ AGPL-3.0-only (matching [upstream](https://github.com/pcaversaccio/safe-tx-hashe
 
 - [Safe Smart Account](https://github.com/safe-global/safe-smart-account)
 - [Safe Transaction Service](https://docs.safe.global/core-api/transaction-service-overview)
+- [Safe Queue Service](https://docs.safe.global/core-api/safe-queue-service-overview)
 - [EIP-712](https://eips.ethereum.org/EIPS/eip-712)
 - [Original Bash Tool](https://github.com/pcaversaccio/safe-tx-hashes-util)

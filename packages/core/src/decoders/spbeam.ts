@@ -4,14 +4,11 @@
  *
  * Contract: 0x36B072ed8AFE665E3Aa6DaBa79Decbec63752b22 (Ethereum mainnet)
  *
- * Why this decoder exists: the Safe Transaction Service has no ABI cached for
- * this contract, so its API returns `dataDecoded: null` and every SPBEAM
- * transaction arrives as undecoded calldata. The ABI below is transcribed from
- * the source verified on Sourcify (exact match, verified 2025-04-08,
- * `src/SPBEAM.sol:SPBEAM`, solc 0.8.24+commit.e11b9ed9). It is pinned to one
- * address on one network — this decoder never guesses an ABI from a selector
- * lookup, and every decode is re-encoded and compared against the raw calldata
- * before it is returned.
+ * The ABI below is transcribed from the source verified on Sourcify (exact
+ * match, verified 2025-04-08, `src/SPBEAM.sol:SPBEAM`, solc
+ * 0.8.24+commit.e11b9ed9). It is pinned to one address on one network. This
+ * decoder never guesses an ABI from a selector lookup, and every decode is
+ * re-encoded and compared against the raw calldata before it is returned.
  *
  * Docs: https://docs.sky.money/
  */

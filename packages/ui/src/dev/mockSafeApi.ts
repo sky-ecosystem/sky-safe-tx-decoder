@@ -1,11 +1,12 @@
 /**
- * Development-only mock of the Safe Transaction Service.
+ * Development-only mock of the Safe Queue Service, the Safe Info route of the
+ * Safe Transaction Service, and the Safe Decoder Service.
  *
  * ## Why this exists
  *
  * A decoder can only be reviewed against a transaction the app can load, and
- * the app loads transactions from the Safe Transaction Service by Safe address
- * and nonce. A contract that has never been called from a Safe therefore has no
+ * the app loads transactions from the Safe Queue Service by Safe address and
+ * nonce. A contract that has never been called from a Safe therefore has no
  * transaction to inspect, and its decoder cannot be seen rendered at all.
  *
  * This module serves fabricated transactions for one sentinel Safe address so
@@ -34,12 +35,10 @@
  *
  * ## Honest hashes
  *
- * Fixtures carry a zero `safeTxHash`. The app recomputes the hash from the
- * transaction fields and will report a mismatch, which is the correct outcome
- * for fabricated data. Nothing here fakes a passing verification.
+ * Fixtures carry a placeholder `safeTxHash`. The app recomputes the hash from
+ * the transaction fields and will report a mismatch, which is the correct
+ * outcome for fabricated data. Nothing here fakes a passing verification.
  */
-
-import type { SafeApiMultisigTransaction } from '@shield3/sky-safe-core'
 
 /** Unique to this module. A production bundle must not contain it. */
 export const MOCK_MARKER = 'SAFE_API_MOCK_FIXTURE_9f3a2c'
@@ -121,11 +120,6 @@ function safeInfo() {
   }
 }
 
-function transactionsFor(nonce: number): SafeApiMultisigTransaction[] {
-  const fixture = BY_NONCE.get(nonce)
-  return fixture ? [fixture.transaction as unknown as SafeApiMultisigTransaction] : []
-}
-
 /** Whether the page on screen is one of the sentinel Safe's pages. */
 function onSentinelRoute(): boolean {
   return window.location.hash.toLowerCase().includes(MOCK_SAFE_ADDRESS.toLowerCase())
@@ -156,10 +150,104 @@ function fixtureForCall(body: string | null): Fixture | undefined {
   return undefined
 }
 
-function allTransactions(): SafeApiMultisigTransaction[] {
-  return [...BY_NONCE.entries()]
-    .sort(([a], [b]) => b - a)
-    .map(([, fixture]) => fixture.transaction as unknown as SafeApiMultisigTransaction)
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
+/** An address in the Safe Queue Service form: lowercase, and null for zero. */
+function queueAddress(value: unknown): string | null {
+  if (typeof value !== 'string' || value.toLowerCase() === ZERO_ADDRESS) return null
+  return value.toLowerCase()
+}
+
+/**
+ * A fixture in the Safe Queue Service record shape, as the real service
+ * returns it. The client converts it, so the pages read fixtures through the
+ * same adapter as a real Safe. The record does not carry a decoding: the
+ * client asks the Safe Decoder Service, which this mock answers for fixture
+ * calldata.
+ */
+function toQueueRecord(tx: Record<string, unknown>, chainId: string) {
+  const delegate = queueAddress(tx.proposedByDelegate)
+  // The client keeps one record per safeTxHash, and several fixtures share
+  // the zero placeholder. A zero placeholder becomes the nonce, padded to 32
+  // bytes, which is unique per fixture and still not the real hash.
+  const placeholder = /^0x0{64}$/.test(String(tx.safeTxHash))
+  return {
+    safeTxHash: placeholder ? `0x${Number(tx.nonce).toString(16).padStart(64, '0')}` : tx.safeTxHash,
+    chainId,
+    safe: String(tx.safe).toLowerCase(),
+    nonce: String(tx.nonce),
+    proposer: queueAddress(tx.proposer),
+    proposedVia: delegate ? 'DELEGATE' : tx.proposer ? 'OWNER' : 'UNKNOWN',
+    proposedBy: delegate,
+    to: queueAddress(tx.to),
+    value: String(tx.value),
+    data: tx.data ?? null,
+    operation: tx.operation,
+    safeTxGas: String(tx.safeTxGas),
+    baseGas: String(tx.baseGas),
+    gasPrice: String(tx.gasPrice),
+    gasToken: queueAddress(tx.gasToken),
+    refundReceiver: queueAddress(tx.refundReceiver),
+    failed: null,
+    notes: null,
+    originName: null,
+    originUrl: null,
+    txHash: null,
+    executor: null,
+    // A fixture without a submission date keeps none. The timeline then
+    // shows the time as pending, not an invented date.
+    created: tx.submissionDate ?? '',
+    modified: tx.modified ?? tx.submissionDate ?? '',
+    confirmations: Array.isArray(tx.confirmations)
+      ? tx.confirmations.map((c: Record<string, unknown>) => ({
+          owner: String(c.owner).toLowerCase(),
+          signature: c.signature,
+          signatureType: c.signatureType,
+          created: c.submissionDate,
+          modified: c.submissionDate,
+        }))
+      : [],
+  }
+}
+
+/**
+ * GET /queue/api/v1/multisig-transactions/queue for the sentinel Safe: the
+ * fixtures at or above the mock on-chain nonce, in the Safe Queue Service
+ * shape, with its `nonceOrder`, `limit` and `offset`.
+ */
+function queueAnswer(url: string): Response {
+  const params = new URL(url).searchParams
+  const chainId = (params.get('safes') ?? '').split(':')[1] ?? '1'
+  const order = params.get('nonceOrder') === 'desc' ? -1 : 1
+  const limit = Number(params.get('limit') ?? 50)
+  const offset = Number(params.get('offset') ?? 0)
+  const all = [...BY_NONCE.entries()]
+    .filter(([nonce]) => nonce >= MOCK_ONCHAIN_NONCE)
+    .sort(([a], [b]) => order * (a - b))
+    .map(([, fixture]) => toQueueRecord(fixture.transaction, chainId))
+  const results = all.slice(offset, offset + limit)
+  const more = offset + limit < all.length
+  return json({ count: all.length, next: more ? 'next' : null, previous: offset > 0 ? 'previous' : null, results })
+}
+
+/**
+ * GET /queue/api/v1/safes/{address}/multisig-transactions for the sentinel
+ * Safe: every fixture, in the Safe Queue Service shape, with its `chainId`,
+ * `nonceOrder`, `limit` and `offset`. The Safe page list and the lookup by
+ * nonce read this route.
+ */
+function listAnswer(url: string): Response {
+  const params = new URL(url).searchParams
+  const chainId = params.get('chainId') ?? '1'
+  const order = params.get('nonceOrder') === 'asc' ? 1 : -1
+  const limit = Number(params.get('limit') ?? 50)
+  const offset = Number(params.get('offset') ?? 0)
+  const all = [...BY_NONCE.entries()]
+    .sort(([a], [b]) => order * (a - b))
+    .map(([, fixture]) => toQueueRecord(fixture.transaction, chainId))
+  const results = all.slice(offset, offset + limit)
+  const more = offset + limit < all.length
+  return json({ count: all.length, next: more ? 'next' : null, previous: offset > 0 ? 'previous' : null, results })
 }
 
 /**
@@ -178,17 +266,17 @@ export function installMockSafeApi(): void {
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
 
-    // POST /api/v1/data-decoder/ for proposer mode. The request names no Safe,
-    // so it is answered only while a sentinel Safe page is on screen, and only
-    // for a fixture's own calldata. The answer is that fixture's dataDecoded,
-    // so a fixture checked in proposer mode decodes as it does on its
-    // transaction page. A fixture without one gets a 200 with a null body,
-    // which the client reads as no decoding, the same as the null the fixture
-    // carries. Any other calldata goes to the real service.
+    // POST /decoder/api/v1/data-decoder, the Safe Decoder Service. The request
+    // names no Safe, so it is answered only while a sentinel Safe page is on
+    // screen, and only for a fixture's own calldata. The answer is that
+    // fixture's dataDecoded, so a fixture decodes the same on its transaction
+    // page and in proposer mode. A fixture without one gets a 200 with a null
+    // body, which the client reads as no decoding. Any other calldata goes to
+    // the real service.
     //
     // While window.__safeApiMockDecoderFailure is set, every such request on a
     // sentinel Safe page fails with that status instead.
-    if (/\/api\/v1\/data-decoder\/$/.test(url) && onSentinelRoute()) {
+    if (/\/decoder\/api\/v1\/data-decoder$/.test(url) && onSentinelRoute()) {
       const failure = window.__safeApiMockDecoderFailure
       if (failure !== undefined) {
         return new Response(JSON.stringify({ detail: `Simulated data decoder failure ${failure}` }), {
@@ -207,23 +295,15 @@ export function installMockSafeApi(): void {
       return realFetch(input as RequestInfo, init)
     }
 
-    // /api/v1/safes/{address}/  — Safe info, used for the version
-    if (/\/safes\/[^/]+\/$/.test(url)) return json(safeInfo())
+    // Safe Queue Service: the queue, which proposer mode reads.
+    if (/\/queue\/api\/v1\/multisig-transactions\/queue\?/.test(url)) return queueAnswer(url)
 
-    // /api/v*/safes/{address}/multisig-transactions/?nonce=N
-    const nonceMatch = url.match(/[?&]nonce=(\d+)/)
-    if (nonceMatch) {
-      const results = transactionsFor(Number(nonceMatch[1]))
-      return json({ count: results.length, next: null, previous: null, results })
-    }
+    // Safe Queue Service: the Safe's transaction list, which the Safe page and
+    // the lookup by nonce read.
+    if (/\/queue\/api\/v1\/safes\/[^/]+\/multisig-transactions\?/.test(url)) return listAnswer(url)
 
-    // /api/v1/safes/{address}/multisig-transactions/?limit=N  — the list view
-    // Also the queue proposer mode reads. Its filters are not applied here.
-    // The client applies them itself.
-    if (url.includes('multisig-transactions')) {
-      const results = allTransactions()
-      return json({ count: results.length, next: null, previous: null, results })
-    }
+    // Safe Transaction Service: /api/v1/safes/{address}/, the Safe info.
+    if (/\/tx-service\/[^/]+\/api\/v1\/safes\/[^/]+\/$/.test(url)) return json(safeInfo())
 
     return realFetch(input as RequestInfo, init)
   }

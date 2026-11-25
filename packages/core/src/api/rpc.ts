@@ -26,6 +26,23 @@ export async function rpcCall(
   params: unknown[],
   signal?: AbortSignal
 ): Promise<string | null> {
+  const result = await rpcCallResult(rpcUrl, method, params, signal);
+  return typeof result === 'string' ? result : null;
+}
+
+/**
+ * Make one JSON-RPC call whose `result` is an object, such as
+ * `eth_getTransactionByHash`.
+ *
+ * @returns the `result` as received, or null on any failure. The caller checks
+ *   its shape.
+ */
+export async function rpcCallResult(
+  rpcUrl: string,
+  method: string,
+  params: unknown[],
+  signal?: AbortSignal
+): Promise<unknown> {
   try {
     const response = await fetch(rpcUrl, {
       method: 'POST',
@@ -34,8 +51,8 @@ export async function rpcCall(
       signal,
     });
     if (!response.ok) return null;
-    const json = (await response.json()) as { result?: unknown };
-    return typeof json.result === 'string' ? json.result : null;
+    const json = (await response.json()) as { result?: unknown } | null;
+    return json && typeof json === 'object' && 'result' in json ? (json.result ?? null) : null;
   } catch {
     // Network failure, abort, or malformed response. Fail closed.
     return null;

@@ -3,11 +3,10 @@
  * transaction.
  *
  * Shared by the queued-transaction page, which reads the fields from the Safe
- * Transaction Service, and by proposer mode, where a person enters them before
- * the transaction exists. Both pass the same inputs here: the signed fields,
- * the Safe, its version, the chain, and the Safe API's decoding of the
- * calldata (a record's `dataDecoded`, or the data decoder's answer for the
- * same calldata). Everything a signer sees about the call is derived here or
+ * Queue Service, and by proposer mode, where a person enters them before the
+ * transaction exists. Both pass the same inputs here: the signed fields, the
+ * Safe, its version, the chain, and the Safe Decoder Service's decoding of the
+ * calldata. Everything a signer sees about the call is derived here or
  * from this result, so the two pages cannot drift apart.
  */
 
@@ -74,9 +73,9 @@ export interface AnalyzedTransaction {
   /** The Safe API's decoding of the calldata, as received. */
   dataDecoded: SafeApiDataDecoded | null;
   /**
-   * Proposer mode only: the data decoder gave no usable answer, so
-   * `dataDecoded` is null for want of an answer, not because the service has
-   * no decoding. Always false on the queued page, which reads the record.
+   * The Safe Decoder Service gave no usable answer, so `dataDecoded` is null
+   * for want of an answer, not because the service has no decoding. Set on
+   * both pages.
    */
   apiDecoderFailed: boolean;
   hashes: SafeTxHashResult;
@@ -89,7 +88,7 @@ export interface AnalyzedTransaction {
 }
 
 /**
- * The signed fields of a Safe Transaction Service record.
+ * The signed fields of a transaction record.
  *
  * The service reports a call without calldata as `data: null`. The contract
  * hashes empty bytes for it, so null is read as `0x`. Passing null on threw in

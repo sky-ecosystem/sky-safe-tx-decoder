@@ -38,7 +38,9 @@ export interface SafeTransactionData {
 }
 
 /**
- * Network configuration for Safe Transaction Service API
+ * Network configuration. `apiUrl` is the Safe Transaction Service for the
+ * chain, used for Safe info. The Safe Queue Service and the Safe Decoder
+ * Service have one URL for every chain and take `chainId` as a parameter.
  */
 export interface NetworkConfig {
   name: string
@@ -84,7 +86,7 @@ export interface DecodedTransaction {
  */
 
 /**
- * Response from /api/v2/safes/{address}/multisig-transactions/?nonce={nonce}
+ * A page of transactions in the Safe Transaction Service record shape.
  */
 export interface SafeApiMultisigTransactionResponse {
   count: number
@@ -94,7 +96,11 @@ export interface SafeApiMultisigTransactionResponse {
 }
 
 /**
- * Individual multisig transaction from Safe Transaction Service
+ * Multisig transaction in the Safe Transaction Service record shape. The
+ * client converts every Safe Queue Service record to this shape with
+ * `adaptQueueTransaction`. That service does not return `executionDate`,
+ * `blockNumber`, the gas and fee fields, `trusted` or `signatures`, so they
+ * are null or false on a converted record.
  */
 export interface SafeApiMultisigTransaction {
   safe: Address
@@ -140,6 +146,81 @@ export interface SafeApiMultisigTransaction {
   confirmations: SafeApiConfirmation[]
   trusted: boolean
   signatures: string | null
+  /**
+   * The Safe Queue Service does not return a decoding, so the client asks the
+   * Safe Decoder Service. When the decoder did not answer, or the caller did
+   * not ask for a decoding, `dataDecoded` is null for want of an answer and
+   * this field holds the reason. Absent when `dataDecoded` is the decoder's
+   * own answer.
+   */
+  dataDecodedUnavailable?: string
+}
+
+/**
+ * Multisig transaction as the Safe Queue Service returns it.
+ *
+ * All addresses are lowercase. `to`, `gasToken` and `refundReceiver` are null
+ * when unset or the zero address. Numbers are decimal strings.
+ *
+ * @see https://docs.safe.global/core-api/safe-queue-service-reference
+ */
+export interface SafeQueueMultisigTransaction {
+  safeTxHash: string
+  /** Decimal string. */
+  chainId: string
+  safe: string
+  /** Decimal string. */
+  nonce: string
+  /**
+   * Address credited with the proposal: the signer for `OWNER`, the delegating
+   * owner for `DELEGATE`, the owner Safe for `NESTED_OWNER`. Null for `UNKNOWN`.
+   */
+  proposer: string | null
+  /** `OWNER`, `DELEGATE`, `NESTED_OWNER` or `UNKNOWN`. An open list. */
+  proposedVia: string
+  /** Address that signed the proposal, set only when it differs from `proposer`. */
+  proposedBy: string | null
+  to: string | null
+  value: string
+  data: string | null
+  operation: number
+  safeTxGas: string
+  baseGas: string
+  gasPrice: string
+  gasToken: string | null
+  refundReceiver: string | null
+  /** Null until execution. */
+  failed: boolean | null
+  notes: string | null
+  originName: string | null
+  originUrl: string | null
+  /** Execution transaction hash. Null while the transaction is not executed. */
+  txHash: string | null
+  executor: string | null
+  created: string
+  modified: string
+  confirmations: SafeQueueConfirmation[]
+}
+
+/**
+ * Confirmation as the Safe Queue Service returns it.
+ */
+export interface SafeQueueConfirmation {
+  owner: string
+  signature: string
+  signatureType: string
+  created: string
+  modified: string
+}
+
+/**
+ * Page of a Safe Queue Service list.
+ */
+export interface SafeQueueMultisigTransactionResponse {
+  count: number
+  next: string | null
+  previous: string | null
+  results: SafeQueueMultisigTransaction[]
 }
 
 /**
@@ -168,6 +249,13 @@ export interface SafeApiDataDecoded {
      */
     valueDecoded?: SafeApiNestedTransaction[] | unknown
   }>
+  /**
+   * How the Safe Decoder Service matched the ABI: `FULL_MATCH`,
+   * `PARTIAL_MATCH`, `ONLY_FUNCTION_MATCH` or `NO_MATCH`. Present only on a
+   * Decoder Service answer. The tool re-encodes every decoding, so it does not
+   * rely on this field.
+   */
+  accuracy?: string
 }
 
 /**

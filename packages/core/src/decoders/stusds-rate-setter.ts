@@ -3,9 +3,6 @@
  *
  * Contract: 0x30784615252B13E1DbE2bDf598627eaC297Bf4C5 (Ethereum mainnet)
  *
- * Why this decoder exists: the Safe Transaction Service has no record of this
- * contract at all (GET /api/v1/contracts/<address>/ returns 404), so its API
- * returns `dataDecoded: null` and every call arrives as undecoded calldata.
  * The ABI below is transcribed from the source verified on Sourcify
  * (`src/StUsdsRateSetter.sol:StUsdsRateSetter`, solc 0.8.21+commit.d9974bed).
  * It is pinned to one address on one network — this decoder never guesses an

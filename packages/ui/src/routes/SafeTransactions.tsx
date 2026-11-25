@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   SafeApiClient,
+  type DecodeDataResult,
   type SafeApiMultisigTransaction,
+  currentNonceOf,
   getSafeUrl,
   getEtherscanAddressUrl,
 } from '@shield3/sky-safe-core';
@@ -12,6 +14,11 @@ import { WeiValue } from '../components/WeiValue';
 import { conciseTimeline } from '../components/TransactionLog';
 import { useSafeRoute } from '../safe-route/SafeRouteProvider';
 
+/** One decoder request per distinct target and calldata. */
+function decodingKey(tx: SafeApiMultisigTransaction): string {
+  return `${tx.to.toLowerCase()}:${(tx.data ?? '0x').toLowerCase()}`;
+}
+
 export default function SafeTransactions() {
   // network + safeAddress come from SafeRouteProvider — no manual useParams,
   // no manual loadNetworkContracts.
@@ -20,24 +27,38 @@ export default function SafeTransactions() {
   const navigate = useNavigate();
 
   const [transactions, setTransactions] = useState<SafeApiMultisigTransaction[]>([]);
+  // The Safe's current nonce, from its Safe info. A transaction that is not
+  // executed is pending at or above it, and not executed below it.
+  const [currentNonce, setCurrentNonce] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState('Loading transactions...');
   const [error, setError] = useState<string | null>(null);
   const [showPendingOnly, setShowPendingOnly] = useState(false);
   const [nonceInput, setNonceInput] = useState('');
+  // Decoder answers by decodingKey. The list renders before them, and each
+  // row updates as its answer arrives.
+  const [decodings, setDecodings] = useState<Map<string, DecodeDataResult>>(new Map());
 
   useEffect(() => {
     const fetchTransactions = async () => {
       try {
         setLoading(true);
         setError(null);
+        setTransactions([]);
         setLoadingMessage('Loading transactions...');
 
         const client = new SafeApiClient(network, (message) => {
           setLoadingMessage(message);
         });
-        const result = await client.fetchTransactions(address as `0x${string}`);
+        // Safe info gives the current nonce and the threshold. The list comes
+        // from the Safe Queue Service. A failure of either is an error, never
+        // an empty list.
+        const safeInfo = await client.fetchSafeInfo(address as `0x${string}`);
+        const nonce = currentNonceOf(safeInfo);
+        // Without decodings, so the list shows at once. They follow below.
+        const result = await client.fetchTransactions(address as `0x${string}`, 20, safeInfo, { decode: false });
 
+        setCurrentNonce(nonce);
         setTransactions(result.results);
       } catch (err) {
         let errorMessage = 'Failed to fetch transactions';
@@ -61,9 +82,35 @@ export default function SafeTransactions() {
     fetchTransactions();
   }, [address, network]);
 
-  const handleTransactionClick = (nonce: string) => {
-    navigate(`/safe/${network}/${address}/tx/${nonce}`);
+  // Decode the rows in the background, one request at a time: the decoder
+  // rate limits requests without an API key, and parallel requests get 429.
+  // Aborted when the list, the Safe or the network changes, and on unmount.
+  useEffect(() => {
+    const controller = new AbortController();
+    setDecodings(new Map());
+    const client = new SafeApiClient(network);
+    (async () => {
+      const asked = new Set<string>();
+      for (const tx of transactions) {
+        if (tx.dataDecoded || !tx.data || tx.data === '0x') continue;
+        const key = decodingKey(tx);
+        if (asked.has(key)) continue;
+        asked.add(key);
+        const result = await client.decodeData(tx.data as `0x${string}`, tx.to, controller.signal);
+        if (controller.signal.aborted) return;
+        setDecodings((previous) => new Map(previous).set(key, result));
+      }
+    })();
+    return () => controller.abort();
+  }, [transactions, address, network]);
+
+  const handleTransactionClick = (tx: SafeApiMultisigTransaction) => {
+    // The safeTxHash names this transaction, not another one at its nonce.
+    navigate(`/safe/${network}/${address}/tx/${tx.nonce.toString()}?safeTxHash=${tx.safeTxHash}`);
   };
+
+  const isPending = (tx: SafeApiMultisigTransaction) =>
+    !tx.isExecuted && currentNonce !== null && Number(tx.nonce) >= currentNonce;
 
   const handleNonceSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,7 +119,7 @@ export default function SafeTransactions() {
     }
   };
 
-  const filteredTransactions = showPendingOnly ? transactions.filter((tx) => !tx.isExecuted) : transactions;
+  const filteredTransactions = showPendingOnly ? transactions.filter(isPending) : transactions;
 
   if (loading) {
     return (
@@ -174,7 +221,9 @@ export default function SafeTransactions() {
       {filteredTransactions.length === 0 ? (
         <div className="text-center py-12">
           <p className="text-gray-500">
-            {showPendingOnly ? 'No pending transactions found.' : 'No transactions found for this Safe.'}
+            {showPendingOnly
+              ? `The ${transactions.length} most recent transactions from the Safe Queue Service do not include one pending at or above nonce ${currentNonce}.`
+              : 'The Safe Queue Service returned zero transactions for this Safe.'}
           </p>
         </div>
       ) : (
@@ -182,7 +231,7 @@ export default function SafeTransactions() {
           {filteredTransactions.map((tx) => (
             <div
               key={tx.safeTxHash}
-              onClick={() => handleTransactionClick(tx.nonce.toString())}
+              onClick={() => handleTransactionClick(tx)}
               className="border rounded-lg p-4 hover:border-blue-500 hover:shadow-md cursor-pointer transition-all"
             >
               <div className="flex items-start justify-between">
@@ -195,10 +244,18 @@ export default function SafeTransactions() {
                           ? tx.isSuccessful
                             ? 'bg-green-100 text-green-800'
                             : 'bg-red-100 text-red-800'
-                          : 'bg-yellow-100 text-yellow-800'
+                          : isPending(tx)
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-gray-100 text-gray-700'
                       }`}
                     >
-                      {tx.isExecuted ? (tx.isSuccessful ? 'Executed' : 'Failed') : 'Pending'}
+                      {tx.isExecuted
+                        ? tx.isSuccessful
+                          ? 'Executed'
+                          : 'Failed'
+                        : isPending(tx)
+                          ? 'Pending'
+                          : 'Not executed'}
                     </span>
                   </div>
 
@@ -209,10 +266,34 @@ export default function SafeTransactions() {
                     <div>
                       <span className="text-gray-600">Value:</span> <WeiValue value={tx.value} />
                     </div>
-                    {tx.dataDecoded &&
-                      (isApiFallbackSentinel(tx.dataDecoded) ? (
+                    {(() => {
+                      if (!tx.data || tx.data === '0x') return null;
+                      const decoding: DecodeDataResult | undefined = tx.dataDecoded
+                        ? { status: 'decoded', decoded: tx.dataDecoded }
+                        : decodings.get(decodingKey(tx));
+                      if (!decoding) {
+                        return (
+                          <div>
+                            <span className="text-gray-600">Method:</span>{' '}
+                            <span className="text-gray-500 italic">decoding…</span>
+                          </div>
+                        );
+                      }
+                      if (decoding.status === 'failed') {
+                        // The decoder did not answer. That is not "no ABI found".
+                        return (
+                          <div>
+                            <span className="text-gray-600">Method:</span>{' '}
+                            <span className="text-gray-500 italic">
+                              not decoded: Safe&apos;s decoder did not answer
+                            </span>
+                          </div>
+                        );
+                      }
+                      if (decoding.status === 'none') return null;
+                      return isApiFallbackSentinel(decoding.decoded) ? (
                         // The Safe API's "fallback" is its "could not decode"
-                        // sentinel, not a real method — do not show it as one.
+                        // sentinel, not a real method. Do not show it as one.
                         <div>
                           <span className="text-gray-600">Method:</span>{' '}
                           <span className="text-gray-500 italic">unable to decode</span>
@@ -220,19 +301,25 @@ export default function SafeTransactions() {
                       ) : (
                         <div>
                           <span className="text-gray-600">Method:</span>{' '}
-                          <span className="font-semibold">{tx.dataDecoded.method}</span>
+                          <span className="font-semibold">{decoding.decoded.method}</span>
                         </div>
-                      ))}
+                      );
+                    })()}
                     <div>
-                      <span className="text-gray-600">Confirmations:</span> {tx.confirmations.length}/
-                      {tx.confirmationsRequired}
+                      {/* The threshold is the current one. It applies to a
+                          pending transaction only: an executed or replaced
+                          one shows its count alone. */}
+                      <span className="text-gray-600">Confirmations:</span>{' '}
+                      {isPending(tx)
+                        ? `${tx.confirmations.length}/${tx.confirmationsRequired}`
+                        : tx.confirmations.length}
                     </div>
                     {/* Compact lifecycle log, indented under confirmations. */}
                     <div className="mt-1 ml-1 space-y-0.5 border-l-2 border-gray-200 pl-3">
                       {conciseTimeline(tx).map((row, i) => (
                         <div key={i} className="flex flex-wrap items-center gap-1 text-xs text-gray-500">
                           <span className="font-medium text-gray-600">{row.label}</span>
-                          <span>· {row.time}</span>
+                          {row.time && <span>· {row.time}</span>}
                           {row.actor && (
                             <>
                               <span>by</span>

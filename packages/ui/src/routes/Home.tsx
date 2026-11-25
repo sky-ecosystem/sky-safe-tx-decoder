@@ -52,7 +52,7 @@ const PROTOCOL_DECODERS: ProtocolDecoder[] = [
     name: 'Sky Protocol — SPBEAM',
     address: '0x36B072ed8AFE665E3Aa6DaBa79Decbec63752b22',
     summary:
-      'Sky Protocol Bounded External Access Module. Sets stability fees and the savings rate within governance-configured bounds. The Safe Transaction Service does not decode this contract. Rate values show basis points and percentage; ilk identifiers show their ASCII label alongside the full bytes32.',
+      'Sky Protocol Bounded External Access Module. Sets stability fees and the savings rate within governance-configured bounds. Rate values show basis points and percentage; ilk identifiers show their ASCII label alongside the full bytes32.',
     signatureCount: 7,
     functions: [
       { group: 'Rate updates', names: 'set (bulk, one entry per ilk)' },
@@ -65,7 +65,7 @@ const PROTOCOL_DECODERS: ProtocolDecoder[] = [
     name: 'Sky Protocol — StUsdsRateSetter',
     address: '0x30784615252B13E1DbE2bDf598627eaC297Bf4C5',
     summary:
-      'Sets the stUSDS savings rate, ilk duty, debt ceiling and supply cap within governance-configured bounds. The Safe Transaction Service holds no ABI for this contract at all.',
+      'Sets the stUSDS savings rate, ilk duty, debt ceiling and supply cap within governance-configured bounds.',
     signatureCount: 7,
     functions: [
       { group: 'Rate / ceiling updates', names: 'set (strBps, dutyBps, line, cap)' },
@@ -92,7 +92,7 @@ const PROTOCOL_DECODERS: ProtocolDecoder[] = [
     name: 'Sky Protocol — PAU AdministeredAgent',
     address: '0xdBD17832df0e57b1732cE1C84c652E820e549BAa',
     summary:
-      'Parallelized Allocation Unit — the allocator entry point for Grove and the second active PAU. A PAU Controller is a diamond: the selector a Safe signs is replaced in transit and appears in no published ABI, so the Safe Transaction Service and Sourcify render every allocator call as undecodable. This decoder resolves each call through a per-Controller dispatch table, verified against the chain before anything is shown, and renders the executing facet function, both selectors, the facet, the integration id, and the arguments. Registered for the Grove agent above and for 0x1837505D104F7a6D8b7e19452610B0A3D652EF12.',
+      'Parallelized Allocation Unit — the allocator entry point for Grove and the second active PAU. A PAU Controller is a diamond: the selector a Safe signs is replaced in transit and appears in no published ABI, so the Safe Decoder Service and Sourcify render every allocator call as undecodable. This decoder resolves each call through a per-Controller dispatch table, verified against the chain before anything is shown, and renders the executing facet function, both selectors, the facet, the integration id, and the arguments. Registered for the Grove agent above and for 0x1837505D104F7a6D8b7e19452610B0A3D652EF12.',
     signatureCount: 23,
     functions: [
       { group: 'Batch', names: 'batchCall, call (one card per forwarded Controller call)' },
