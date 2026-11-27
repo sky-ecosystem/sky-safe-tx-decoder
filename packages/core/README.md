@@ -143,7 +143,9 @@ selector.
 - `getAddressTag()` - Known contract labels
 
 ### API Client
-- `createSafeApiClient()` - Safe Transaction Service client
+- `createSafeApiClient()` - Safe API client. Reads transactions from the Safe Queue Service, Safe info from the Safe Transaction Service, and decodings from the Safe Decoder Service. Checks each transaction record against the request.
+- `adaptQueueTransaction()` - Convert a Safe Queue Service record to the transaction record shape the tool reads
+- `fetchExecutionTime()` - Read the block time of an execution transaction from a JSON-RPC node
 - `isNetworkSupported()` - Check network availability
 
 ## License

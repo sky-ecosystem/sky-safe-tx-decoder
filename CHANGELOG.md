@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented here.
 
+## [Unreleased]
+
+Transactions come from the Safe Queue Service, and decodings from the Safe Decoder Service. Safe is moving proposals off the Safe Transaction Service. Safe info stays on the Safe Transaction Service.
+
+### Changed
+
+- **Every transaction read comes from the Safe Queue Service, `https://api.safe.global/queue`.** One service serves every chain. A request names the chain with the network's chain ID. The tool does not read transactions from the Safe Transaction Service.
+  - The Safe page lists the Safe's 20 most recent transactions: `GET /api/v1/safes/{safe}/multisig-transactions?chainId={chainId}&nonceOrder=desc&limit=20`.
+  - A lookup by nonce, in the CLI `verify` command and on the transaction page, reads the same list in pages of 100 and keeps the transactions at that nonce. The service does not filter by nonce. The lookup stops at the first page that goes below the nonce. A list out of nonce order is an error, because the early stop depends on the order. It reads at most 20 pages and names the limit when the nonce is further back.
+  - A lookup by safeTxHash reads `GET /api/v1/multisig-transactions/{safeTxHash}`. A 404 means the transaction is not found.
+  - The Paste a transaction page reads the queue: `GET /api/v1/multisig-transactions/queue?safes={safe}:{chainId}`, in pages of 100, up to five pages. A queue longer than 500 transactions is an error. The tool does not use a partial queue.
+  - A transaction executed without a proposal is not in the Safe Queue Service, so the tool does not find it.
+- **Decodings come from the Safe Decoder Service: `POST https://api.safe.global/decoder/api/v1/data-decoder` with `{data, to, chainId}`.** It replaces the Safe Transaction Service data decoder.
+  - `to` is checksummed, because the service rejects one that is not. A call without a target sends `{data}` only, because the service requires `to` with `chainId`.
+  - The service answers 404 for an unknown selector. That is no decoding, not a failure. Empty calldata is not sent.
+  - The answer carries an `accuracy` field. The tool accepts it and re-encodes every decoding as before.
+- **Each Safe Queue Service record is checked and converted to the record shape the tool reads.** `adaptQueueTransaction` in core does this.
+  - The Safe Queue Service ignores a query parameter it does not know and returns 200 without that filter. Each record must have the requested Safe and chain, and the requested nonce or safeTxHash for a lookup. A mismatch is an error that names the full expected and the full received value. The Safe info must name the requested Safe.
+  - Every address is checksummed. A null `to`, `gasToken` or `refundReceiver` becomes the zero address, which is the value the Safe hashes. The computed safeTxHash of the live nonce-520 transaction of Safe `0xf65475e74C1Ed6d004d5240b06E3088724dFDA5d` matches the safeTxHash the service reports.
+  - `nonce`, `safeTxGas` and `baseGas` become numbers. A value above 2^53 - 1 is an error, because a number does not hold it exactly.
+  - `proposedByDelegate` is `proposedBy` only when `proposedVia` is `DELEGATE`.
+  - `confirmationsRequired` is the Safe's current threshold.
+  - When the Safe Decoder Service does not answer, the transaction shows "Not decoded: Safe's decoder did not answer.", not the no-ABI state. A new optional field, `dataDecodedUnavailable`, holds the reason.
+  - The record does not carry `executionDate`, `blockNumber`, the gas and fee fields, `trusted` or `signatures`. They are null or false. The tool does not read them in any check.
+- **The transaction page reads the execution time from the network's RPC node.** For an executed transaction, or the one that used a replaced transaction's nonce, it calls `eth_getTransactionByHash` for the block number and `eth_getBlockByNumber` for the block time. While it loads, the timeline shows that it is loading. When the node does not answer, the timeline shows that the time is not available. The page does not wait for it. The Safe page list does not call the node, so an executed row there does not show a time. Core exports `fetchExecutionTime`.
+- **The Safe page and the transaction page show the status against the Safe's current nonce.** A transaction not executed is "Pending" at or above the current nonce and "Not executed" below it. The timeline of a "Not executed" transaction ends with a row that says its nonce is used, when the list does not hold the transaction that used it. "Show pending only" keeps the pending ones. A row opens the transaction by its safeTxHash.
+- **The Safe page list shows at once and decodes its rows after.** The decoder rate limits requests without an API key. The page sends one request at a time, once per distinct target and calldata, and updates each row as its answer arrives. A row that waits shows "decoding…". Leaving the page, or changing the Safe or network, stops the requests.
+  - A failed read shows an error. An empty list shows that the Safe Queue Service returned zero transactions. The two stay distinct.
+- **A transaction that is not pending shows its confirmation count alone, on the Safe page and the transaction page.** The CLI does this for an executed transaction. The current threshold can differ from the threshold at execution. A pending transaction shows the count and the current threshold.
+- **The development mock serves the Safe Queue Service and Safe Decoder Service routes.** Fixtures come in the Safe Queue Service record shape. A fixture with a zero safeTxHash gets a placeholder equal to its nonce padded to 32 bytes.
+
 ## [0.6.0] — 2026-10-19
 
 A page to paste and check a transaction before it is proposed, decoding of the PSM and ERC-4626 facets and of `AdministeredAgent.call`, and a CLI that no longer prints an all-clear under a call it has not decoded and verified.

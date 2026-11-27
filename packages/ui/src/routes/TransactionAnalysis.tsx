@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { SafeApiClient, resolveRequestedTransaction, type SafeApiMultisigTransaction } from '@shield3/sky-safe-core';
+import {
+  SafeApiClient,
+  currentNonceOf,
+  fetchExecutionTime,
+  getNetwork,
+  resolveRequestedTransaction,
+  type SafeApiMultisigTransaction,
+} from '@shield3/sky-safe-core';
 import { Address } from '../components/Address';
-import { TransactionLog } from '../components/TransactionLog';
+import { TransactionLog, executedTransactionFor, type ExecutionTime } from '../components/TransactionLog';
 import { useSafeRoute } from '../safe-route/SafeRouteProvider';
 import { isSimulatedSafe } from '../safe-route/isSimulatedSafe';
 import {
@@ -32,6 +39,13 @@ export default function TransactionAnalysis() {
   const [loading, setLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState('Loading transaction...');
   const [error, setError] = useState<string | null>(null);
+  // Execution time of the executed transaction in the timeline, read from a
+  // node after the page loads. It does not block the page, and a failure
+  // shows that the time is not available.
+  const [executionTime, setExecutionTime] = useState<ExecutionTime | undefined>(undefined);
+  // The Safe's current nonce, from its Safe info. A transaction that is not
+  // executed is pending at or above it, and not executed below it.
+  const [currentNonce, setCurrentNonce] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchAndAnalyze = async () => {
@@ -54,8 +68,14 @@ export default function TransactionAnalysis() {
         setTransaction(null);
         setAllTransactions([]);
 
+        // The Safe info gives the threshold and the version.
+        setLoadingMessage('Loading Safe info...');
+        const safeInfo = await client.fetchSafeInfo(address as `0x${string}`);
+        setCurrentNonce(currentNonceOf(safeInfo));
+
         // Fetch all transactions with this nonce
-        const transactions = await client.fetchTransactionsByNonce(address as `0x${string}`, parseInt(nonce));
+        setLoadingMessage('Loading transaction...');
+        const transactions = await client.fetchTransactionsByNonce(address as `0x${string}`, parseInt(nonce), safeInfo);
 
         // A safeTxHash in the link (the same-nonce selector, or Find in queue)
         // names one transaction. That one is shown, or an error. Never
@@ -65,7 +85,7 @@ export default function TransactionAnalysis() {
           nonce: parseInt(nonce),
           safeTxHash: safeTxHashParam,
           transactions,
-          fetchByHash: (hash) => client.fetchTransactionByHash(hash),
+          fetchByHash: (hash) => client.fetchTransactionByHash(hash, address as `0x${string}`),
         });
         if (!resolved.ok) {
           setError(resolved.message);
@@ -75,9 +95,8 @@ export default function TransactionAnalysis() {
         setAllTransactions(resolved.transactions);
         setTransaction(tx);
 
-        // Fetch Safe version
-        setLoadingMessage('Loading Safe version...');
-        const safeVersion = await client.fetchSafeVersion(address as `0x${string}`);
+        // Same fallback as fetchSafeVersion.
+        const safeVersion = safeInfo.version || '0.0.0';
         setLoadingMessage('Calculating transaction hash...');
 
         setAnalyzed(
@@ -88,6 +107,10 @@ export default function TransactionAnalysis() {
             version: safeVersion,
             transaction: fieldsFromApiTransaction(tx),
             dataDecoded: tx.dataDecoded,
+            // A Safe Queue Service record does not carry a decoding. When the
+            // Safe Decoder Service did not answer for it, say so, not "no ABI
+            // found".
+            apiDecoderFailed: tx.dataDecodedUnavailable !== undefined,
           })
         );
       } catch (err) {
@@ -111,6 +134,27 @@ export default function TransactionAnalysis() {
 
     fetchAndAnalyze();
   }, [address, nonce, network, safeTxHashParam]);
+
+  // The execution time is not in the Safe Queue Service record. Read it from
+  // the network's node: the block of the execution transaction, then the
+  // block's time.
+  const executedTx = transaction ? executedTransactionFor(transaction, allTransactions) : undefined;
+  const executionTxHash = executedTx?.transactionHash ?? null;
+  useEffect(() => {
+    if (!executionTxHash) {
+      setExecutionTime(undefined);
+      return;
+    }
+    const controller = new AbortController();
+    setExecutionTime({ status: 'loading' });
+    fetchExecutionTime(getNetwork(network).rpcUrl, executionTxHash, controller.signal).then((time) => {
+      if (!controller.signal.aborted) setExecutionTime({ status: 'loaded', time });
+    });
+    return () => controller.abort();
+  }, [executionTxHash, network]);
+
+  const isPending = (tx: SafeApiMultisigTransaction) =>
+    !tx.isExecuted && currentNonce !== null && Number(tx.nonce) >= currentNonce;
 
   // Handler for switching between multiple transactions
   const handleTransactionSwitch = (safeTxHash: string) => {
@@ -200,7 +244,9 @@ export default function TransactionAnalysis() {
                   ? tx.isSuccessful
                     ? '✅ Executed'
                     : '❌ Failed'
-                  : `⏳ Pending (${tx.confirmations?.length || 0}/${tx.confirmationsRequired})`;
+                  : isPending(tx)
+                    ? `⏳ Pending (${tx.confirmations?.length || 0}/${tx.confirmationsRequired})`
+                    : `Not executed (${tx.confirmations?.length || 0} sigs)`;
                 const date = tx.submissionDate ? new Date(tx.submissionDate).toLocaleString() : 'Unknown';
                 return (
                   // The full safeTxHash, never abbreviated: this selector is how
@@ -231,17 +277,29 @@ export default function TransactionAnalysis() {
                     ? transaction.isSuccessful
                       ? 'text-green-600'
                       : 'text-red-600'
-                    : 'text-yellow-600'
+                    : isPending(transaction)
+                      ? 'text-yellow-600'
+                      : 'text-gray-600'
                 }`}
               >
-                {transaction.isExecuted ? (transaction.isSuccessful ? '✅ Executed' : '❌ Failed') : '⏳ Pending'}
+                {transaction.isExecuted
+                  ? transaction.isSuccessful
+                    ? '✅ Executed'
+                    : '❌ Failed'
+                  : isPending(transaction)
+                    ? '⏳ Pending'
+                    : 'Not executed'}
               </span>
             </div>
             {!transaction.isExecuted && (
               <div className="flex items-center justify-between text-sm mt-2">
                 <span className="text-gray-600">Confirmations:</span>
+                {/* The threshold is the current one. It applies to a pending
+                    transaction only. */}
                 <span>
-                  {transaction.confirmations.length} / {transaction.confirmationsRequired}
+                  {isPending(transaction)
+                    ? `${transaction.confirmations.length} / ${transaction.confirmationsRequired}`
+                    : transaction.confirmations.length}
                 </span>
               </div>
             )}
@@ -249,7 +307,13 @@ export default function TransactionAnalysis() {
             {/* Lifecycle timeline: proposed → signed → rejected/executed. */}
             <div className="mt-4 pt-4 border-t border-gray-200">
               <p className="text-gray-600 text-sm font-medium mb-2">Timeline</p>
-              <TransactionLog transaction={transaction} allTransactions={allTransactions} safeAddress={address as string} />
+              <TransactionLog
+                transaction={transaction}
+                allTransactions={allTransactions}
+                safeAddress={address as string}
+                executionTime={executionTime}
+                currentNonce={currentNonce}
+              />
             </div>
           </div>
         }

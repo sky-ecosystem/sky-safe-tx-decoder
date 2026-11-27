@@ -74,7 +74,7 @@ export function createVerifyCommand(): Command {
   const command = new Command('verify');
 
   command
-    .description('Fetch and verify a Safe transaction from the Safe Transaction Service or local file')
+    .description('Fetch and verify a Safe transaction from the Safe Queue Service or local file')
     .option('-a, --address <address>', 'Safe multisig address')
     .option('-n, --nonce <nonce>', 'Transaction nonce', parseNonce)
     .option('--network <network>', 'Network name (e.g., ethereum, sepolia)', 'ethereum')
@@ -179,8 +179,15 @@ export function createVerifyCommand(): Command {
           const spinner = ora('Fetching transaction(s) from Safe API...').start();
 
           try {
+            // The Safe info gives the threshold and the version.
+            const safeInfo = await client.fetchSafeInfo(options.address as Address);
+
             // Fetch all transactions with this nonce
-            const transactions = await client.fetchTransactionsByNonce(options.address as Address, options.nonce!);
+            const transactions = await client.fetchTransactionsByNonce(
+              options.address as Address,
+              options.nonce!,
+              safeInfo
+            );
 
             spinner.stop();
 
@@ -223,9 +230,9 @@ export function createVerifyCommand(): Command {
               tx = transactions[0]!;
             }
 
-            const spinner2 = ora('Fetching Safe version...').start();
-            version = await client.fetchSafeVersion(options.address as Address);
-            spinner2.succeed('Transaction fetched successfully');
+            // Same fallback as fetchSafeVersion.
+            version = safeInfo.version || '0.0.0';
+            ora().succeed('Transaction fetched successfully');
           } catch (error) {
             spinner.fail('Failed to fetch transaction');
             throw error;

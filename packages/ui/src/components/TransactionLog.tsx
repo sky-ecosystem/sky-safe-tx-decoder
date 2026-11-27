@@ -1,8 +1,11 @@
 /**
  * Lifecycle log for a Safe transaction: when it was proposed, each signature,
  * whether/when the nonce was consumed by a rejection or a competing tx, and
- * when it executed. All timestamps come straight from the Safe Transaction
- * Service (submissionDate, confirmations[].submissionDate, executionDate).
+ * when it executed. The proposal and signature times come straight from the
+ * Safe Queue Service record (submissionDate, confirmations[].submissionDate).
+ * That record does not carry the execution time. The transaction page reads
+ * it from a node and passes it in as `executionTime`. The list does not, so
+ * its executed rows do not show a time.
  *
  * Actors (proposer, signer, executor) render through <Address> so they pick up
  * address-book / Safe treatment and are never abbreviated.
@@ -24,12 +27,43 @@ interface TransactionLogProps {
   /** All transactions sharing this nonce — used to detect rejection/supersede. */
   allTransactions: SafeApiMultisigTransaction[];
   safeAddress: string;
+  /**
+   * Execution time of the executed transaction in the log: this one, or the
+   * one that used its nonce. Read from a node by the page. Absent when no
+   * transaction in the log is executed.
+   */
+  executionTime?: ExecutionTime;
+  /**
+   * The Safe's current nonce. A transaction that is not executed, below it,
+   * and without an executed sibling in the log had its nonce used by a
+   * transaction the log does not hold.
+   */
+  currentNonce?: number | null;
+}
+
+/** The execution time as the page has it: still loading, or the answer. Null means the node did not give it. */
+export type ExecutionTime = { status: 'loading' } | { status: 'loaded'; time: string | null };
+
+/** Text in place of an execution time the log does not have. */
+function missingExecutionTime(executionTime: ExecutionTime | undefined): string {
+  return executionTime?.status === 'loading' ? 'loading execution time…' : 'execution time not available';
+}
+
+/** The executed transaction a log entry reports on, if any. */
+export function executedTransactionFor(
+  transaction: SafeApiMultisigTransaction,
+  allTransactions: SafeApiMultisigTransaction[]
+): SafeApiMultisigTransaction | undefined {
+  if (transaction.isExecuted) return transaction;
+  return allTransactions.find((t) => t.safeTxHash !== transaction.safeTxHash && t.isExecuted);
 }
 
 type Tone = 'proposed' | 'signed' | 'executed' | 'failed' | 'rejected';
 
 interface LogEvent {
   date: string | null;
+  /** Shown when `date` is null. Default "pending". */
+  missingDate?: string;
   title: string;
   tone: Tone;
   actor?: string;
@@ -57,8 +91,8 @@ const DOT: Record<Tone, string> = {
  * 'short'` appends the local zone (e.g. "PST", "GMT+1"), so the time is never
  * ambiguous about whether it is UTC or local.
  */
-function formatTime(iso: string | null): string {
-  if (!iso) return 'pending';
+function formatTime(iso: string | null, missing: string = 'pending'): string {
+  if (!iso) return missing;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const abs = d.toLocaleString(undefined, { timeZoneName: 'short' });
@@ -96,8 +130,8 @@ function relative(diffMs: number): string {
  */
 export function conciseTimeline(
   tx: SafeApiMultisigTransaction
-): Array<{ label: string; time: string; actor?: string; delegateOf?: string | null }> {
-  const rows: Array<{ label: string; time: string; actor?: string; delegateOf?: string | null }> = [
+): Array<{ label: string; time?: string; actor?: string; delegateOf?: string | null }> {
+  const rows: Array<{ label: string; time?: string; actor?: string; delegateOf?: string | null }> = [
     {
       label: 'Proposed',
       time: formatTime(tx.submissionDate),
@@ -115,7 +149,9 @@ export function conciseTimeline(
   if (tx.isExecuted) {
     rows.push({
       label: tx.isSuccessful === false ? 'Reverted' : 'Executed',
-      time: formatTime(tx.executionDate),
+      // The list does not read the time from a node. Absent unless the
+      // record carries it.
+      time: tx.executionDate ? formatTime(tx.executionDate) : undefined,
       actor: tx.executor || undefined,
     });
   }
@@ -127,7 +163,16 @@ function isRejectionTx(tx: SafeApiMultisigTransaction, safeAddress: string): boo
   return tx.to.toLowerCase() === safeAddress.toLowerCase() && tx.value === '0' && (!tx.data || tx.data === '0x');
 }
 
-export function TransactionLog({ transaction, allTransactions, safeAddress }: TransactionLogProps) {
+export function TransactionLog({
+  transaction,
+  allTransactions,
+  safeAddress,
+  executionTime,
+  currentNonce,
+}: TransactionLogProps) {
+  const executedAt = (tx: SafeApiMultisigTransaction) =>
+    tx.executionDate ?? (executionTime?.status === 'loaded' ? executionTime.time : null);
+
   const events: LogEvent[] = [];
   const thisIsRejection = isRejectionTx(transaction, safeAddress);
 
@@ -157,7 +202,8 @@ export function TransactionLog({ transaction, allTransactions, safeAddress }: Tr
   // Terminal state
   if (transaction.isExecuted) {
     events.push({
-      date: transaction.executionDate,
+      date: executedAt(transaction),
+      missingDate: missingExecutionTime(executionTime),
       title:
         transaction.isSuccessful === false
           ? 'Executed — reverted'
@@ -169,17 +215,28 @@ export function TransactionLog({ transaction, allTransactions, safeAddress }: Tr
     });
   } else {
     // Not executed: did a sibling at this nonce consume it?
-    const executedSibling = allTransactions.find((t) => t.safeTxHash !== transaction.safeTxHash && t.isExecuted);
+    const executedSibling = executedTransactionFor(transaction, allTransactions);
     if (executedSibling) {
       const rej = isRejectionTx(executedSibling, safeAddress);
       events.push({
-        date: executedSibling.executionDate,
+        date: executedAt(executedSibling),
+        missingDate: missingExecutionTime(executionTime),
         title: rej ? 'Rejected on-chain' : 'Superseded at this nonce',
         tone: 'rejected',
         actor: executedSibling.executor || undefined,
         detail: rej
           ? 'the nonce was consumed by an on-chain rejection'
           : 'a different transaction at this nonce was executed',
+      });
+    } else if (currentNonce !== undefined && currentNonce !== null && Number(transaction.nonce) < currentNonce) {
+      // The nonce is used, by a transaction the Safe Queue Service does not
+      // hold, for example one executed without a proposal.
+      events.push({
+        date: null,
+        missingDate: 'time not known',
+        title: 'Not executed',
+        tone: 'rejected',
+        detail: `nonce ${transaction.nonce} is used by another transaction`,
       });
     } else {
       events.push({
@@ -201,7 +258,7 @@ export function TransactionLog({ transaction, allTransactions, safeAddress }: Tr
             />
             <div className="flex flex-col gap-0.5">
               <span className="font-semibold text-sm text-gray-900">{e.title}</span>
-              <span className="text-xs text-gray-500">{formatTime(e.date)}</span>
+              <span className="text-xs text-gray-500">{formatTime(e.date, e.missingDate)}</span>
               {e.actor && (
                 <span className="text-xs mt-0.5">
                   <span className="text-gray-500">by </span>
